@@ -113,3 +113,21 @@ commands or behavior that the code does not provide.
 
 Before completion, inspect the final diff, run `git diff --check`, check
 generated files, and clearly report live behavior that remains unverified.
+
+## Performance and resource usage
+
+Review resource behavior before adding compositor watchers, timers, IPC
+subscriptions, event-loop work, background tasks, threads, caches, buffers, or
+parallel work.
+
+- Keep the compositor event loop event-driven. Avoid busy loops, high-frequency
+  polling, duplicate subscriptions, and retry storms.
+- Bound per-client and per-surface work, queues, retries, memory, and
+  concurrency. Do not create unbounded workers for clients, outputs, or events.
+- Give every activity explicit cancellation and cleanup on disconnect, reload,
+  client destruction, backend failure, and shutdown.
+- Measure CPU, resident memory, threads, file descriptors, wakeups, and
+  relevant latency under idle, normal, and stress workloads.
+
+Compilation, unit tests, and a successful compositor start do not establish
+acceptable resource behavior.

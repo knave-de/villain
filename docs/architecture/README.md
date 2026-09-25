@@ -8,6 +8,7 @@ versioning, build, and compatibility policy.
 - [Configuration](configuration.md)
 - [Versioning and compatibility](versioning.md)
 - [Build and packaging](build-and-packaging.md)
+- [Performance and resource usage](performance.md)
 - [Change impact](change-impact.md)
 
 These local documents describe Villain's responsibilities without duplicating

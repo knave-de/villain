@@ -12,3 +12,12 @@ compatibility, or lifecycle code:
 
 Cross-repository changes must update the linked Knave/shell consumers and
 preserve a compatibility path until the coordinated replacement is deployed.
+
+If the change adds watchers, timers, subscriptions, background work, caches,
+buffers, or parallelism, also record idle behavior, resource bounds,
+cancellation and cleanup, and measured CPU, memory, thread, descriptor, and
+wakeup impact under representative workloads. Check that work is not multiplied
+unboundedly by clients, surfaces, outputs, workspaces, or reconnect attempts.
+
+Do not accept a functionally correct event path that continuously wakes the
+compositor or spawns unbounded work.
