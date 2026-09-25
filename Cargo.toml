@@ -25,8 +25,8 @@ smithay = { version = "0.7.0", default-features = false, features = [
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 xcursor = "0.3.11"
-knave-desktop-api = { git = "ssh://git@github.com/knave-de/knave.git", rev = "1a7a031" }
-knave-config = { git = "ssh://git@github.com/knave-de/knave.git", rev = "1a7a031" }
+knave-desktop-api = { git = "ssh://git@github.com/knave-de/knave.git", rev = "1eb63fe" }
+knave-config = { git = "ssh://git@github.com/knave-de/knave.git", rev = "1eb63fe" }
 serde_json = "1"
 base64 = "0.22"
 png = "0.18"
