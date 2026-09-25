@@ -23,7 +23,9 @@ seat, GPU, or display.
 Villain handles SIGINT and SIGTERM through its calloop event loop, allowing
 the Wayland socket and lock to be removed on normal shutdown and initialization
 failure. The session supervisor still owns process termination and restart
-policy.
+policy. Direct-session environment activation uses one bounded worker and is
+cancellable during shutdown; nested Winit mode does not modify the host
+activation environment.
 
 ## Build and install
 

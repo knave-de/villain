@@ -29,6 +29,11 @@ loop; additional clients remain in the Unix listener backlog until a slot is
 released. Disconnects return their slot, and shutdown drops the listener with
 the compositor process.
 
+Direct-session environment activation uses one worker and a one-entry request
+queue. Reload bursts are coalesced instead of spawning one thread per reload;
+shutdown sets a cancellation flag, terminates an active integration child, and
+joins the worker.
+
 ## Nested baseline
 
 A release nested-session sample on 2026-09-26 measured Villain in Winit mode
