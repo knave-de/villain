@@ -2,6 +2,9 @@
 
 use std::{
     collections::BTreeMap,
+    ffi::OsStr,
+    fs,
+    os::unix::fs::FileTypeExt,
     path::{Path, PathBuf},
     process::Command,
 };
@@ -16,6 +19,36 @@ const ACTIVATION_KEYS: &[&str] = &[
     "XDG_SESSION_TYPE",
     "XDG_DATA_DIRS",
 ];
+/// Removes the Wayland socket owned by one Villain process on every exit path.
+pub struct SocketCleanup {
+    socket: PathBuf,
+    lock: PathBuf,
+}
+
+impl SocketCleanup {
+    pub fn new(socket_name: &OsStr) -> Option<Self> {
+        let runtime = std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from)?;
+        let socket = runtime.join(socket_name);
+        let lock = PathBuf::from(format!("{}.lock", socket.display()));
+        Some(Self { socket, lock })
+    }
+}
+
+impl Drop for SocketCleanup {
+    fn drop(&mut self) {
+        let removed = match fs::symlink_metadata(&self.socket) {
+            Ok(metadata) if metadata.file_type().is_socket() => {
+                fs::remove_file(&self.socket).is_ok()
+            }
+            Ok(_) => false,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => true,
+            Err(_) => false,
+        };
+        if removed {
+            let _ = fs::remove_file(&self.lock);
+        }
+    }
+}
 
 /// Complete the environment inherited by compositor-launched applications.
 pub fn prepare_environment(state: &mut Villain) {

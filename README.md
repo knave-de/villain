@@ -20,6 +20,11 @@ The Winit path runs nested inside an existing Wayland or X11 desktop for
 development and tests. Compilation does not prove either path can acquire a
 seat, GPU, or display.
 
+Villain handles SIGINT and SIGTERM through its calloop event loop, allowing
+the Wayland socket and lock to be removed on normal shutdown and initialization
+failure. The session supervisor still owns process termination and restart
+policy.
+
 ## Build and install
 
 Villain is Cargo-first:

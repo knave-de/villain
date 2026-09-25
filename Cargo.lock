@@ -1974,6 +1974,7 @@ dependencies = [
  "base64",
  "knave-config",
  "knave-desktop-api",
+ "libc",
  "png",
  "serde_json",
  "smithay",
