@@ -31,6 +31,8 @@ pub struct IpcServer {
     path: PathBuf,
 }
 
+const MAX_CLIENTS: usize = 16;
+
 impl Drop for IpcServer {
     fn drop(&mut self) {
         remove_socket(&self.path);
@@ -69,6 +71,13 @@ pub fn init(
             }
         })?;
 
+    let (available_slots, slots) = mpsc::sync_channel(MAX_CLIENTS);
+    for _ in 0..MAX_CLIENTS {
+        available_slots
+            .send(())
+            .expect("client slot channel is newly created");
+    }
+
     thread::Builder::new()
         .name("knave-desktop-ipc".into())
         .spawn(move || {
@@ -76,10 +85,21 @@ pub fn init(
                 let Ok(stream) = stream else {
                     break;
                 };
+                let Ok(slot) = slots.recv() else {
+                    break;
+                };
                 let sender = sender.clone();
-                let _ = thread::Builder::new()
+                let worker_slots = available_slots.clone();
+                if thread::Builder::new()
                     .name("knave-desktop-client".into())
-                    .spawn(move || serve_connection(stream, sender));
+                    .spawn(move || {
+                        serve_connection(stream, sender);
+                        let _ = worker_slots.send(slot);
+                    })
+                    .is_err()
+                {
+                    let _ = available_slots.send(slot);
+                }
             }
         })?;
 

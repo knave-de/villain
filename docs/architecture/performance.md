@@ -22,3 +22,9 @@ behavior.
 Record a baseline and expected delta for performance-sensitive changes. Explain
 or mitigate regressions before merge; do not hide them by reducing the workload
 or omitting measurements.
+
+The desktop IPC listener admits at most 16 simultaneous client connections.
+Each active connection may have one request waiting on the compositor event
+loop; additional clients remain in the Unix listener backlog until a slot is
+released. Disconnects return their slot, and shutdown drops the listener with
+the compositor process.
