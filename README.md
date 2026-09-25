@@ -81,6 +81,10 @@ second configuration store. Villain receives the validated projection during
 session startup and reload; legacy compatibility is migration-only and must
 not silently delete old values.
 
+The tracked `config.example.toml` is a legacy migration/test fixture only; it
+is not loaded or installed by Villain. Create and edit the canonical Knave
+configuration instead.
+
 ## Repository boundaries
 
 | Area | Owner |

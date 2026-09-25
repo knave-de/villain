@@ -19,3 +19,7 @@ silently deleted.
 Runtime state, socket paths, seat/VT discovery, and process bookkeeping belong
 to the runtime/session boundary rather than persistent user configuration.
 Legacy data must not be silently deleted.
+
+The tracked root `config.example.toml` is retained only as a legacy migration
+fixture for tests and review. Villain does not load or install it as a runtime
+configuration file; new user configuration belongs exclusively to Knave.
