@@ -62,7 +62,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         render::init_winit(&mut event_loop, &mut state)?;
     }
     if direct {
-        session::activate(&state, true);
+        session::activate(&mut state, true);
     }
 
     tracing::info!(socket = ?state.socket_name, "Villain is ready");

@@ -103,6 +103,7 @@ enum ActivationCommand {
 /// slot. The stop flag lets shutdown cancel a command child before joining.
 pub(crate) struct ActivationWorker {
     sender: SyncSender<ActivationCommand>,
+    receiver: Option<mpsc::Receiver<ActivationCommand>>,
     stop: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
 }
@@ -110,9 +111,23 @@ pub(crate) struct ActivationWorker {
 impl ActivationWorker {
     pub(crate) fn new() -> Self {
         let (sender, receiver) = mpsc::sync_channel(1);
-        let stop = Arc::new(AtomicBool::new(false));
-        let worker_stop = Arc::clone(&stop);
-        let thread = thread::Builder::new()
+        Self {
+            sender,
+            receiver: Some(receiver),
+            stop: Arc::new(AtomicBool::new(false)),
+            thread: None,
+        }
+    }
+
+    fn start(&mut self) {
+        if self.thread.is_some() {
+            return;
+        }
+        let Some(receiver) = self.receiver.take() else {
+            return;
+        };
+        let worker_stop = Arc::clone(&self.stop);
+        self.thread = thread::Builder::new()
             .name("villain-session-activation".into())
             .spawn(move || {
                 while let Ok(command) = receiver.recv() {
@@ -133,20 +148,14 @@ impl ActivationWorker {
                     }
                 }
             })
+            .map_err(|error| {
+                tracing::warn!(%error, "could not start session activation worker");
+            })
             .ok();
-
-        if thread.is_none() {
-            tracing::warn!("could not start session activation worker");
-        }
-
-        Self {
-            sender,
-            stop,
-            thread,
-        }
     }
 
-    pub(crate) fn submit(&self, environment: BTreeMap<String, String>, restart_portal: bool) {
+    pub(crate) fn submit(&mut self, environment: BTreeMap<String, String>, restart_portal: bool) {
+        self.start();
         match self.sender.try_send(ActivationCommand::Run {
             environment,
             restart_portal,
@@ -176,7 +185,7 @@ impl Drop for ActivationWorker {
 ///
 /// This is only called for the TTY backend. A nested development compositor
 /// must not replace the host desktop's activation environment.
-pub fn activate(state: &Villain, restart_portal: bool) {
+pub fn activate(state: &mut Villain, restart_portal: bool) {
     state
         .activation
         .submit(activation_environment(state), restart_portal);
