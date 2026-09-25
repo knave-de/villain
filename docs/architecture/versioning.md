@@ -3,13 +3,14 @@
 Villain independently versions:
 
 - the compositor binary and libraries;
-- the private compositor protocol;
-- any public desktop contract it directly implements; and
-- configuration compatibility adapters.
+- private compositor implementation protocols; and
+- the compatibility range of the Knave desktop API it implements.
 
-Private does not mean undocumented: every protocol change needs sender and
-receiver discovery, a compatibility range, additive/breaking behavior, and a
-rollback path. A compositor-only test run does not prove shell compatibility.
+Knave owns the public desktop API version. Villain pins a concrete Knave API
+revision, validates requests, and must not silently accept incompatible
+messages. Private protocol changes still require sender/receiver discovery,
+additive or breaking behavior, tests, and rollback.
 
-Legacy commands such as `villainctl` remain transitional until all consumers
-use the replacement contract and the removal is a separate reviewed change.
+The public control client is knavectl, owned by Knave. villainctl is removed;
+new control commands are Knave desktop API changes, not Villain-local CLI
+features.

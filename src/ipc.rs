@@ -1,4 +1,4 @@
-//! JSON-Lines IPC server. Socket I/O stays off the compositor thread.
+//! JSON-lines server for Knave’s versioned desktop contract.
 
 use std::{
     ffi::OsStr,
@@ -11,17 +11,20 @@ use std::{
 };
 
 use base64::Engine;
-
+use knave_desktop_api::{
+    API_VERSION, DesktopError, DesktopErrorCode, DesktopQuery, DesktopRequest, DesktopResponse,
+    DesktopSnapshot, ProtocolVersion, WorkspaceId, WorkspacePreview, socket_path_for_display,
+};
 use smithay::reexports::calloop::{EventLoop, channel};
-use villain_ipc::{
-    PROTOCOL_VERSION, Query, Request, Response, WorkspacePreview, socket_path_for_display,
+
+use crate::{
+    dispatch::{Dispatch, DispatchError},
+    state::Villain,
 };
 
-use crate::{dispatch::Dispatch, state::Villain};
-
 struct Envelope {
-    request: Request,
-    response: mpsc::Sender<Response>,
+    request: DesktopRequest,
+    response: mpsc::Sender<DesktopResponse>,
 }
 
 pub struct IpcServer {
@@ -38,9 +41,19 @@ pub fn init(
     event_loop: &mut EventLoop<Villain>,
     display: &OsStr,
 ) -> Result<IpcServer, Box<dyn std::error::Error>> {
-    let runtime = std::env::var_os("XDG_RUNTIME_DIR").ok_or("XDG_RUNTIME_DIR is not set")?;
+    let runtime = std::env::var_os("XDG_RUNTIME_DIR").ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::NotFound, "XDG_RUNTIME_DIR is not set")
+    })?;
     let path = socket_path_for_display(runtime.as_ref(), display);
+    let parent = path.parent().ok_or_else(|| {
+        std::io::Error::other(format!("desktop socket has no parent: {}", path.display()))
+    })?;
+    fs::create_dir_all(parent)?;
+    let mut parent_permissions = fs::metadata(parent)?.permissions();
+    std::os::unix::fs::PermissionsExt::set_mode(&mut parent_permissions, 0o700);
+    fs::set_permissions(parent, parent_permissions)?;
     remove_stale_socket(&path)?;
+
     let listener = UnixListener::bind(&path)?;
     let mut permissions = fs::metadata(&path)?.permissions();
     std::os::unix::fs::PermissionsExt::set_mode(&mut permissions, 0o600);
@@ -57,7 +70,7 @@ pub fn init(
         })?;
 
     thread::Builder::new()
-        .name("villain-ipc".into())
+        .name("knave-desktop-ipc".into())
         .spawn(move || {
             for stream in listener.incoming() {
                 let Ok(stream) = stream else {
@@ -65,12 +78,12 @@ pub fn init(
                 };
                 let sender = sender.clone();
                 let _ = thread::Builder::new()
-                    .name("villain-ipc-client".into())
+                    .name("knave-desktop-client".into())
                     .spawn(move || serve_connection(stream, sender));
             }
         })?;
 
-    tracing::info!(path = %path.display(), "IPC server listening");
+    tracing::info!(path = %path.display(), "Knave desktop IPC listening");
     Ok(IpcServer { path })
 }
 
@@ -88,14 +101,8 @@ fn serve_connection(mut stream: std::os::unix::net::UnixStream, sender: channel:
         let request = match serde_json::from_str(&line) {
             Ok(request) => request,
             Err(error) => {
-                if write_response(
-                    &mut stream,
-                    &Response::Error {
-                        message: format!("invalid request: {error}"),
-                    },
-                )
-                .is_err()
-                {
+                let response = invalid_request(format!("invalid request: {error}"));
+                if write_response(&mut stream, &response).is_err() {
                     return;
                 }
                 continue;
@@ -122,7 +129,7 @@ fn serve_connection(mut stream: std::os::unix::net::UnixStream, sender: channel:
 
 fn write_response(
     stream: &mut std::os::unix::net::UnixStream,
-    response: &Response,
+    response: &DesktopResponse,
 ) -> Result<(), Box<dyn std::error::Error>> {
     serde_json::to_writer(&mut *stream, response)?;
     stream.write_all(b"\n")?;
@@ -130,36 +137,74 @@ fn write_response(
     Ok(())
 }
 
+fn invalid_request(message: String) -> DesktopResponse {
+    DesktopResponse::Error(DesktopError {
+        code: DesktopErrorCode::InvalidRequest,
+        message,
+        retryable: false,
+    })
+}
+
+fn dispatch_error(error: DispatchError) -> DesktopResponse {
+    let code = match error {
+        DispatchError::UnknownWindow(_) | DispatchError::InvalidWorkspace(_) => {
+            DesktopErrorCode::NotFound
+        }
+        DispatchError::NoFocusedWindow
+        | DispatchError::NoMinimizedWindow
+        | DispatchError::MinimizedWindow(_) => DesktopErrorCode::Unavailable,
+        DispatchError::Config(_) | DispatchError::EmptyCommand | DispatchError::Spawn(_) => {
+            DesktopErrorCode::Internal
+        }
+    };
+    DesktopResponse::Error(DesktopError {
+        code,
+        message: error.to_string(),
+        retryable: false,
+    })
+}
+
 impl Villain {
-    fn handle_ipc(&mut self, request: Request) -> Response {
+    fn handle_ipc(&mut self, request: DesktopRequest) -> DesktopResponse {
         match request {
-            Request::Dispatch(request) => self
-                .dispatch(Dispatch::from(request))
-                .map(|()| Response::Ok)
-                .unwrap_or_else(|error| Response::Error {
-                    message: error.to_string(),
+            DesktopRequest::Dispatch(command) => match self.dispatch(Dispatch::from(command)) {
+                Ok(()) => DesktopResponse::Ok,
+                Err(error) => dispatch_error(error),
+            },
+            DesktopRequest::Query(query) => match query {
+                DesktopQuery::Snapshot => DesktopResponse::Snapshot(DesktopSnapshot {
+                    generation: self.next_window_id,
+                    workspaces: self.workspace_info(),
+                    windows: self.window_info(),
                 }),
-            Request::Query(query) => match query {
-                Query::Windows => Response::Windows(self.window_info()),
-                Query::Workspaces => Response::Workspaces(self.workspace_info()),
-                Query::ActiveWindow => Response::ActiveWindow(self.active_window_info()),
-                Query::ActiveWorkspace => Response::ActiveWorkspace(self.active_workspace + 1),
-                Query::WorkspacePreview {
+                DesktopQuery::Windows => DesktopResponse::Windows(self.window_info()),
+                DesktopQuery::Workspaces => DesktopResponse::Workspaces(self.workspace_info()),
+                DesktopQuery::ActiveWindow => {
+                    DesktopResponse::ActiveWindow(self.active_window_info())
+                }
+                DesktopQuery::ActiveWorkspace => DesktopResponse::ActiveWorkspace(WorkspaceId(
+                    (self.active_workspace + 1) as u32,
+                )),
+                DesktopQuery::WorkspacePreview {
                     workspace,
                     width,
                     height,
-                } => match crate::preview::capture(self, workspace, width, height) {
-                    Ok(png) => Response::WorkspacePreview(WorkspacePreview {
+                } => match crate::preview::capture(self, workspace.0 as usize, width, height) {
+                    Ok(png) => DesktopResponse::WorkspacePreview(WorkspacePreview {
                         workspace,
                         width,
                         height,
                         png_base64: base64::engine::general_purpose::STANDARD.encode(png),
                     }),
-                    Err(message) => Response::Error { message },
+                    Err(message) => DesktopResponse::Error(DesktopError {
+                        code: DesktopErrorCode::Unavailable,
+                        message,
+                        retryable: true,
+                    }),
                 },
-                Query::Version => Response::Version {
-                    protocol: PROTOCOL_VERSION,
-                    villain: env!("CARGO_PKG_VERSION").into(),
+                DesktopQuery::Version => DesktopResponse::Version {
+                    protocol: ProtocolVersion { ..API_VERSION },
+                    component: format!("villain {}", env!("CARGO_PKG_VERSION")),
                 },
             },
         }

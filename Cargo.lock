@@ -756,6 +756,27 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e2db585e1d738fc771bf08a151420d3ed193d9d895a36df7f6f8a9456b911ddc"
 
 [[package]]
+name = "knave-config"
+version = "0.1.0"
+source = "git+ssh://git@github.com/knave-de/knave.git?rev=1a7a031#1a7a0317385627bc3a3f6d7986fe847128394458"
+dependencies = [
+ "serde",
+ "thiserror 2.0.20",
+ "toml",
+ "toml_edit 0.23.10+spec-1.0.0",
+]
+
+[[package]]
+name = "knave-desktop-api"
+version = "0.1.0"
+source = "git+ssh://git@github.com/knave-de/knave.git?rev=1a7a031#1a7a0317385627bc3a3f6d7986fe847128394458"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "lazy_static"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1289,7 +1310,7 @@ version = "3.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e67ba7e9b2b56446f1d419b1d807906278ffa1a658a8a5d8a39dcb1f5a78614f"
 dependencies = [
- "toml_edit",
+ "toml_edit 0.25.15+spec-1.1.0",
 ]
 
 [[package]]
@@ -1802,6 +1823,21 @@ dependencies = [
 
 [[package]]
 name = "toml_edit"
+version = "0.23.10+spec-1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "84c8b9f757e028cee9fa244aea147aab2a9ec09d5325a9b01e0a49730c2b5269"
+dependencies = [
+ "indexmap",
+ "serde_core",
+ "serde_spanned",
+ "toml_datetime 0.7.5+spec-1.1.0",
+ "toml_parser",
+ "toml_writer",
+ "winnow 0.7.15",
+]
+
+[[package]]
+name = "toml_edit"
 version = "0.25.15+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1340ea94a5856333492c9064b02c778b191dd2c853778d9609debdcdfea3a614"
@@ -1936,34 +1972,18 @@ name = "villain"
 version = "0.1.0"
 dependencies = [
  "base64",
+ "knave-config",
+ "knave-desktop-api",
  "png",
- "serde",
  "serde_json",
  "smithay",
  "toml",
  "tracing",
  "tracing-subscriber",
- "villain-ipc",
  "wayland-client",
  "wayland-protocols",
  "wayland-protocols-wlr",
  "xcursor",
-]
-
-[[package]]
-name = "villain-ipc"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "villainctl"
-version = "0.1.0"
-dependencies = [
- "serde_json",
- "villain-ipc",
 ]
 
 [[package]]
@@ -2435,6 +2455,9 @@ name = "winnow"
 version = "0.7.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "df79d97927682d2fd8adb29682d1140b343be4ac0f08fd68b7765d9c059d3945"
+dependencies = [
+ "memchr",
+]
 
 [[package]]
 name = "winnow"

@@ -1,137 +1,98 @@
 # Villain
 
-Villain is the Rust/Smithay Wayland compositor and window manager for the Knave
-Desktop Environment. It owns compositor mechanism and window-management policy:
-outputs, rendering, input, workspaces, layout, focus, activation, XWayland,
-and layer-shell.
+Villain is the compositor and window manager for the independent Knave Desktop
+Environment. It owns Wayland protocol handling, window layout, focus,
+workspaces, input policy, rendering, and direct seat/output access.
 
-Villain is experimental. Its internal and public interfaces can change.
+Knave owns session startup, persistent configuration, public desktop commands,
+and the shell. Villain does not integrate with GNOME, KDE, Qt, or another host
+desktop. Winit is a nested development backend; the direct TTY backend is the
+independent desktop runtime.
 
-## Runtime boundary
+## Runtime backends
 
-Villain provides the compositor. Knave Shell provides desktop-facing UI.
-They run as separate processes:
+    villain --tty
+    villain --winit
 
-    Knave Shell
-        | Wayland + private IPC
-        v
-    Villain
-        |
-        +-- native Wayland clients
-        +-- XWayland clients
+With no option, backend selection follows the repository's safe environment
+policy. The TTY path requires a real local VT/seat and performs DRM/KMS setup.
+The Winit path runs nested inside an existing Wayland or X11 desktop for
+development and tests. Compilation does not prove either path can acquire a
+seat, GPU, or display.
 
-Villain owns window state and compositor decisions. Shell code must consume
-explicit contracts and must not duplicate focus, workspace, or layout policy.
+## Build and install
 
-## Build
-
-Requirements depend on the selected backend, but a development build needs
-Rust/Cargo and the Smithay backend development libraries for Wayland, DRM/KMS,
-GBM, libinput, libseat, and XWayland as applicable.
-
-    cargo build --workspace --locked
-
-Run the repository checks:
+Villain is Cargo-first:
 
     cargo fmt --all -- --check
-    cargo clippy --workspace --all-targets -- -D warnings
     cargo test --workspace
+    cargo clippy --workspace --all-targets -- -D warnings
+    cargo build --release --locked
 
-Use an explicit runtime and configuration directory for development tests.
-Do not install implicitly into /usr/local.
+Install the compositor to the user prefix, system prefix, or an explicit
+staging prefix:
 
-## Run
+    scripts/install.sh --user
+    scripts/install.sh --system
+    scripts/install.sh --prefix "$PWD/stage"
 
-Villain accepts one backend option:
+The installer installs villain only. knavectl is installed by the Knave
+repository because it is the public control CLI for the complete desktop.
 
-    villain --help
-    villain --winit   # nested inside an existing Wayland session
-    villain --tty     # direct DRM/KMS from a real local VT and seat
+## Knave desktop IPC
 
-With no option, backend selection follows the current environment. Nested
-operation must not replace the host compositor's activation environment.
-Direct mode requires a real VT, seat, GPU, input session, and appropriate
-permissions. Compilation does not prove direct startup.
+Villain serves Knave's versioned JSON-lines desktop contract at:
 
-Villain publishes a user-only IPC socket:
+    $XDG_RUNTIME_DIR/knave/desktop-$WAYLAND_DISPLAY.sock
 
-    $XDG_RUNTIME_DIR/villain-$WAYLAND_DISPLAY.sock
+The socket is mode 0600 and the containing directory is mode 0700. KNAVE_SOCKET
+overrides the derived path for isolated tests. The wire types and client live
+in Knave's knave-desktop-api crate; Villain must not create a competing public
+protocol.
 
-Set VILLAIN_SOCKET when a client needs an explicit override. Wayland clients
-use the selected WAYLAND_DISPLAY.
+Control commands are issued through knavectl:
+
+    knavectl version
+    knavectl snapshot
+    knavectl windows
+    knavectl workspaces
+    knavectl dispatch workspace 2
+    knavectl dispatch focus-window 1
+    knavectl dispatch minimize
+    knavectl dispatch exec kitty
+
+villainctl is removed. New commands belong to knavectl and are reviewed as
+Knave desktop API changes.
 
 ## Configuration
 
-Configuration ownership is migrating to Knave. The current implementation
-still reads the legacy Villain file:
+The target persistent configuration is
+~/.config/knave/config.toml, owned and schema-versioned by Knave. The
+compositor settings live under [compositor] with modkey, input,
+environment_file, and bind entries. Knave projects the old root-level
+modkey, environment_file, [input], and [[bind]] keys when that table is
+absent, preserving the source document for rollback. Villain never writes a
+second configuration store. Villain receives the validated projection during
+session startup and reload; legacy compatibility is migration-only and must
+not silently delete old values.
 
-1. VILLAIN_CONFIG, when set;
-2. XDG_CONFIG_HOME/villain/config.toml; or
-3. ~/.config/villain/config.toml.
+## Repository boundaries
 
-Use [config.example.toml](config.example.toml) as the current format reference.
-The optional environment file is selected by environment_file and accepts
-literal KEY=VALUE or export KEY=VALUE lines; it is data, not a shell script.
-
-If any bind entries are present, they replace the complete default binding set.
-A configuration reload parses and validates the replacement before applying it.
-The reload command is currently:
-
-    villainctl reload
-
-Do not add a new user-facing configuration store. The target canonical file is
-~/.config/knave/config.toml; the legacy reader remains until migration is
-implemented and verified.
-
-## IPC and villainctl
-
-The IPC protocol is a private JSON Lines transport for Knave components and
-developer tools. It is not the public Knave desktop API.
-
-The workspace contains:
-
-| Package | Responsibility |
+| Area | Owner |
 | --- | --- |
-| villain | Compositor, window state, dispatch, and IPC server |
-| villain-ipc | Smithay-independent request, response, and client types |
-| villainctl | Transitional command-line IPC client |
+| Session lifecycle and process supervision | Knave |
+| Persistent settings and public desktop API | Knave |
+| Wayland compositor, focus, input, layout, and rendering | Villain |
+| Shell presentation and interaction | Knave Shell |
 
-Examples:
+Every change to a shared ID, IPC message, configuration key, or lifecycle
+path must inspect all consumers, version behavior, migration, rollback, and
+the direct/nested live-test coverage.
 
-    cargo run -p villainctl -- version
-    cargo run -p villainctl -- windows
-    cargo run -p villainctl -- workspaces
-    cargo run -p villainctl -- dispatch workspace 2
-    cargo run -p villainctl -- dispatch focus-window 1
-    cargo run -p villainctl -- dispatch minimize
-    cargo run -p villainctl -- dispatch restore-minimized
-    cargo run -p villainctl -- dispatch exec kitty
-
-The IPC boundary uses one-based workspace numbers. Window IDs are monotonic
-for the compositor lifetime and are not reused. Protocol changes require
-sender/receiver review and compatibility handling.
-
-## Tests and live verification
-
-Run the ordinary workspace checks before a change is complete. For ignored
-Wayland, layer-shell, XWayland, or frame-callback tests:
-
-    cargo test -p villain -- --ignored --nocapture --test-threads=1
-
-The frame-callback helper is documented in
-[tests/README.md](tests/README.md). Live DRM/KMS, VT, GPU, Wayland socket,
-XWayland, portal, and installed-startup behavior must be reported separately
-from unit-test results.
-
-## Architecture and documentation
+## Documentation
 
 - [Architecture index](docs/architecture/README.md)
 - [Component boundaries](docs/architecture/component-boundaries.md)
-- [Configuration boundary](docs/architecture/configuration.md)
 - [Performance policy](docs/architecture/performance.md)
 - [Change-impact checklist](docs/architecture/change-impact.md)
 - [Agent instructions](AGENTS.md)
-
-Keep compositor mechanism separate from window-management policy, IPC
-serialization separate from state mutation, and focus state separate from
-pointer delivery. Use Conventional Commits for focused changes.

@@ -2,7 +2,7 @@
 
 use std::{fmt, io};
 
-use villain_ipc::{DispatchRequest, WindowId};
+use knave_desktop_api::{DesktopCommand, WindowId};
 
 use crate::state::Villain;
 
@@ -21,18 +21,20 @@ pub enum Dispatch {
     Quit,
 }
 
-impl From<DispatchRequest> for Dispatch {
-    fn from(request: DispatchRequest) -> Self {
+impl From<DesktopCommand> for Dispatch {
+    fn from(request: DesktopCommand) -> Self {
         match request {
-            DispatchRequest::ReloadConfig => Self::ReloadConfig,
-            DispatchRequest::CloseFocused => Self::CloseFocused,
-            DispatchRequest::MinimizeFocused => Self::MinimizeFocused,
-            DispatchRequest::RestoreLastMinimized => Self::RestoreLastMinimized,
-            DispatchRequest::FocusWorkspace { workspace } => Self::FocusWorkspace(workspace),
-            DispatchRequest::FocusWindow { window } => Self::FocusWindow(window),
-            DispatchRequest::RestoreWindow { window } => Self::RestoreWindow(window),
-            DispatchRequest::Spawn { argv } => Self::Spawn(argv),
-            DispatchRequest::Quit => Self::Quit,
+            DesktopCommand::ReloadConfiguration => Self::ReloadConfig,
+            DesktopCommand::CloseFocused => Self::CloseFocused,
+            DesktopCommand::MinimizeFocused => Self::MinimizeFocused,
+            DesktopCommand::RestoreLastMinimized => Self::RestoreLastMinimized,
+            DesktopCommand::FocusWorkspace { workspace } => {
+                Self::FocusWorkspace(workspace.0 as usize)
+            }
+            DesktopCommand::FocusWindow { window } => Self::FocusWindow(window),
+            DesktopCommand::RestoreWindow { window } => Self::RestoreWindow(window),
+            DesktopCommand::Spawn { argv } => Self::Spawn(argv),
+            DesktopCommand::Quit => Self::Quit,
         }
     }
 }
@@ -151,11 +153,13 @@ mod tests {
     #[test]
     fn ipc_dispatch_maps_to_internal_dispatch() {
         assert_eq!(
-            Dispatch::from(DispatchRequest::FocusWorkspace { workspace: 2 }),
+            Dispatch::from(DesktopCommand::FocusWorkspace {
+                workspace: knave_desktop_api::WorkspaceId(2),
+            }),
             Dispatch::FocusWorkspace(2)
         );
         assert_eq!(
-            Dispatch::from(DispatchRequest::MinimizeFocused),
+            Dispatch::from(DesktopCommand::MinimizeFocused),
             Dispatch::MinimizeFocused
         );
     }
