@@ -11,4 +11,4 @@ startup. Those paths require explicit integration or live smoke checks.
 
 Packaging and installation must use an explicit prefix and must not implicitly
 write to `/usr/local`. Keep build-system cleanup separate from compositor
-behavior, configuration migration, and legacy-binary removal.
+behavior, configuration migration, and old-binary removal.

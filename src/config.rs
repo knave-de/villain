@@ -294,9 +294,9 @@ mod tests {
         fs::remove_dir_all(directory).unwrap();
     }
     #[test]
-    fn legacy_root_settings_are_projected_by_knave() {
+    fn root_settings_are_projected_by_knave() {
         let directory =
-            std::env::temp_dir().join(format!("villain-legacy-config-{}", std::process::id()));
+            std::env::temp_dir().join(format!("villain-root-config-{}", std::process::id()));
         fs::create_dir_all(&directory).unwrap();
         let path = directory.join("config.toml");
         fs::write(

@@ -47,7 +47,7 @@ For each change, find every sender and receiver, define compatibility or
 migration behavior, update tests, and document user-visible effects.
 
 Villain must not create a second user-facing configuration store. It consumes
-validated projections from ~/.config/knave/config.toml and keeps legacy
+validated projections from ~/.config/knave/config.toml and keeps source
 configuration readable only as an explicit migration path.
 
 ## Runtime safety
@@ -74,7 +74,7 @@ Keep compositor mechanism separate from window-management policy. Keep IPC
 serialization separate from state mutation. Keep focus state separate from
 pointer delivery and layer-shell focus.
 
-Do not perform opportunistic rewrites or unrelated cleanup. Review error paths,
+Do not perform opportunistic refactors or unrelated cleanup. Review error paths,
 event ordering, modifier state, workspace transitions, client destruction,
 XWayland stacking, output changes, and frame pacing for every relevant change.
 
