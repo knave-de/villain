@@ -1,5 +1,8 @@
 //! Ordered workspaces with a master-and-stack layout.
 use crate::{focus::KeyboardFocus, state::Villain};
+use knave_desktop_api::{
+    WindowId, WindowSummary as WindowInfo, WorkspaceId, WorkspaceSummary as WorkspaceInfo,
+};
 use smithay::{
     desktop::{Window, WindowSurfaceType},
     input::pointer::MotionEvent,
@@ -9,7 +12,6 @@ use smithay::{
     xwayland::X11Surface,
 };
 use std::process::Command;
-use villain_ipc::{WindowId, WindowInfo, WorkspaceInfo};
 
 #[derive(Default)]
 pub struct Workspace {
@@ -839,7 +841,7 @@ impl Villain {
                         id: entry.id,
                         title,
                         app_id,
-                        workspace: workspace + 1,
+                        workspace: WorkspaceId((workspace + 1) as u32),
                         minimized: entry.minimized,
                         floating: entry.floating.is_some(),
                         fullscreen: state.fullscreen == Some(entry.id),
@@ -857,14 +859,14 @@ impl Villain {
             .iter()
             .enumerate()
             .map(|(index, workspace)| WorkspaceInfo {
-                workspace: index + 1,
+                workspace: WorkspaceId((index + 1) as u32),
                 active: index == self.active_workspace,
-                window_count: workspace.windows.len(),
+                window_count: workspace.windows.len() as u32,
                 visible_window_count: self
                     .workspace_layout(index)
                     .iter()
                     .filter(|(_, _, _, _, visible)| *visible)
-                    .count(),
+                    .count() as u32,
             })
             .collect()
     }

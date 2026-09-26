@@ -27,29 +27,28 @@ until the compositor event path has been inspected.
 
 ## Contracts and compatibility
 
-The current `villain-ipc` protocol is an internal compositor transport. It is
-not automatically the public Knave desktop API. `villainctl` is a transitional
-developer client and must not be removed until Knave has command and API
-parity.
+The public desktop contract is owned by Knave's knave-desktop-api crate.
+Villain is its versioned server implementation. knavectl is the public control
+client; villainctl and villain-ipc are removed.
 
 Version and test changes to:
 
-- `villain-ipc` request/response/event types;
-- socket naming and readiness behavior;
-- workspace and window fields;
+- the pinned Knave API revision and protocol messages;
+- socket naming, permissions, and readiness behavior;
+- workspace and window IDs and fields;
 - focus and activation semantics;
 - keybinding dispatch;
-- configuration parsing and reload;
+- configuration projection and reload;
 - layer-shell lifecycle;
 - nested/direct backend selection;
 - environment and portal activation.
 
-For each such change, find every sender and receiver, define compatibility or
+For each change, find every sender and receiver, define compatibility or
 migration behavior, update tests, and document user-visible effects.
 
-Villain must not create new user-facing configuration ownership during the
-migration to `~/.config/knave/config.toml`. Existing Villain configuration must
-remain readable until an explicit Knave migration is complete.
+Villain must not create a second user-facing configuration store. It consumes
+validated projections from ~/.config/knave/config.toml and keeps legacy
+configuration readable only as an explicit migration path.
 
 ## Runtime safety
 

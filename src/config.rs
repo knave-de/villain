@@ -6,12 +6,11 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use serde::Deserialize;
+use knave_config::ConfigDocument;
 
 use crate::keybinds::KeybindRegistry;
 
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct InputConfig {
     pub tap_to_click: bool,
     pub natural_scroll: bool,
@@ -34,22 +33,11 @@ pub struct RuntimeConfig {
     path: PathBuf,
 }
 
-#[derive(Clone, Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug)]
 pub(crate) struct BindSpec {
     pub keys: String,
     pub dispatch: String,
-    #[serde(default)]
     pub args: Vec<String>,
-}
-
-#[derive(Debug, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct FileConfig {
-    modkey: Option<String>,
-    environment_file: Option<String>,
-    input: Option<InputConfig>,
-    bind: Option<Vec<BindSpec>>,
 }
 
 #[derive(Debug)]
@@ -65,7 +53,9 @@ impl std::error::Error for ConfigError {}
 
 impl RuntimeConfig {
     pub fn load() -> Result<Self, ConfigError> {
-        Self::load_from(config_path()?)
+        Self::load_from(
+            ConfigDocument::default_path().map_err(|error| ConfigError(error.to_string()))?,
+        )
     }
 
     pub fn reload(&self) -> Result<Self, ConfigError> {
@@ -73,22 +63,22 @@ impl RuntimeConfig {
     }
 
     fn load_from(path: PathBuf) -> Result<Self, ConfigError> {
-        let file = match fs::read_to_string(&path) {
-            Ok(contents) => toml::from_str::<FileConfig>(&contents)
-                .map_err(|error| ConfigError(format!("{}: {error}", path.display())))?,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => FileConfig::default(),
-            Err(error) => {
-                return Err(ConfigError(format!(
-                    "could not read {}: {error}",
-                    path.display()
-                )));
-            }
-        };
-
-        let modkey = file.modkey.as_deref().unwrap_or("Super");
-        let keybinds = match file.bind {
-            Some(bindings) => KeybindRegistry::from_specs(modkey, &bindings),
-            None => KeybindRegistry::defaults(modkey),
+        let document =
+            ConfigDocument::load(&path).map_err(|error| ConfigError(error.to_string()))?;
+        let compositor = &document.config().compositor;
+        let bindings: Vec<BindSpec> = compositor
+            .bind
+            .iter()
+            .map(|binding| BindSpec {
+                keys: binding.keys.clone(),
+                dispatch: binding.dispatch.clone(),
+                args: binding.args.clone(),
+            })
+            .collect();
+        let keybinds = if bindings.is_empty() {
+            KeybindRegistry::defaults(&compositor.modkey)
+        } else {
+            KeybindRegistry::from_specs(&compositor.modkey, &bindings)
         }
         .map_err(ConfigError)?;
 
@@ -97,8 +87,8 @@ impl RuntimeConfig {
             .parent()
             .unwrap_or_else(|| Path::new("."))
             .join("environment");
-        let (environment_path, required) = match file.environment_file {
-            Some(value) => (resolve_path(&value, path.parent())?, true),
+        let (environment_path, required) = match compositor.environment_file.as_deref() {
+            Some(value) => (resolve_path(value, path.parent())?, true),
             None => (default_environment_path, false),
         };
         match fs::read_to_string(&environment_path) {
@@ -113,24 +103,15 @@ impl RuntimeConfig {
         }
 
         Ok(Self {
-            input: file.input.unwrap_or_default(),
+            input: InputConfig {
+                tap_to_click: compositor.input.tap_to_click,
+                natural_scroll: compositor.input.natural_scroll,
+            },
             keybinds,
             environment,
             path,
         })
     }
-}
-
-fn config_path() -> Result<PathBuf, ConfigError> {
-    if let Some(path) = env::var_os("VILLAIN_CONFIG") {
-        return Ok(path.into());
-    }
-    if let Some(path) = env::var_os("XDG_CONFIG_HOME") {
-        return Ok(PathBuf::from(path).join("villain/config.toml"));
-    }
-    let home = env::var_os("HOME")
-        .ok_or_else(|| ConfigError("HOME is not set; cannot locate Villain config".into()))?;
-    Ok(PathBuf::from(home).join(".config/villain/config.toml"))
 }
 
 fn resolve_path(value: &str, base: Option<&Path>) -> Result<PathBuf, ConfigError> {
@@ -263,12 +244,20 @@ mod tests {
 
     #[test]
     fn shipped_examples_are_valid() {
-        let file: FileConfig = toml::from_str(include_str!("../config.example.toml")).unwrap();
-        KeybindRegistry::from_specs(
-            file.modkey.as_deref().unwrap_or("Super"),
-            file.bind.as_deref().unwrap(),
-        )
-        .unwrap();
+        let config: knave_config::Config =
+            toml::from_str(include_str!("../config.example.toml")).unwrap();
+        config.validate().unwrap();
+        let specs: Vec<BindSpec> = config
+            .compositor
+            .bind
+            .iter()
+            .map(|binding| BindSpec {
+                keys: binding.keys.clone(),
+                dispatch: binding.dispatch.clone(),
+                args: binding.args.clone(),
+            })
+            .collect();
+        KeybindRegistry::from_specs(&config.compositor.modkey, &specs).unwrap();
         let mut environment = BTreeMap::new();
         parse_environment(
             include_str!("../environment.example"),
@@ -276,6 +265,7 @@ mod tests {
             &mut environment,
         )
         .unwrap();
+
         assert_eq!(environment["XDG_SESSION_TYPE"], "wayland");
     }
 
@@ -287,16 +277,45 @@ mod tests {
         let path = directory.join("config.toml");
         fs::write(
             &path,
-            "modkey = \"Alt\"\n[input]\ntap_to_click = false\nnatural_scroll = false\n",
+            "schema_version = 1\n[compositor]\nmodkey = \"Alt\"\n[compositor.input]\ntap_to_click = false\nnatural_scroll = false\n",
         )
         .unwrap();
         let current = RuntimeConfig::load_from(path.clone()).unwrap();
         assert!(!current.input.tap_to_click);
         assert!(!current.input.natural_scroll);
 
-        fs::write(&path, "modkey = \"Invalid\"\n").unwrap();
+        fs::write(
+            &path,
+            "schema_version = 1\n[compositor]\nmodkey = \"Invalid\"\n",
+        )
+        .unwrap();
         assert!(current.reload().is_err());
         assert!(!current.input.tap_to_click);
+        fs::remove_dir_all(directory).unwrap();
+    }
+    #[test]
+    fn legacy_root_settings_are_projected_by_knave() {
+        let directory =
+            std::env::temp_dir().join(format!("villain-legacy-config-{}", std::process::id()));
+        fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("config.toml");
+        fs::write(
+            &path,
+            r#"schema_version = 1
+modkey = "Alt"
+[input]
+tap_to_click = false
+natural_scroll = false
+[[bind]]
+keys = "MOD+Q"
+dispatch = "close"
+"#,
+        )
+        .unwrap();
+
+        let config = RuntimeConfig::load_from(path).unwrap();
+        assert!(!config.input.tap_to_click);
+        assert!(!config.input.natural_scroll);
         fs::remove_dir_all(directory).unwrap();
     }
 }

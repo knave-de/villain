@@ -16,6 +16,7 @@ mod layer_shell;
 mod preview;
 mod render;
 mod session;
+mod shutdown;
 mod state;
 mod tty;
 mod window_grab;
@@ -47,9 +48,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     // Parse options before creating sockets so --help works without a session.
     let mut event_loop: EventLoop<'static, Villain> = EventLoop::try_new()?;
+    shutdown::install(&mut event_loop)?;
     let display = Display::new()?;
     let config = config::RuntimeConfig::load()?;
     let mut state = Villain::new(&mut event_loop, display, config);
+    let _socket_cleanup = session::SocketCleanup::new(&state.socket_name);
     state.owns_session = direct;
     session::prepare_environment(&mut state);
     xwayland::init(&mut event_loop, &mut state);
@@ -59,7 +62,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         render::init_winit(&mut event_loop, &mut state)?;
     }
     if direct {
-        session::activate(&state, true);
+        session::activate(&mut state, true);
     }
 
     tracing::info!(socket = ?state.socket_name, "Villain is ready");
@@ -72,6 +75,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         state.render_if_needed();
     })?;
 
+    shutdown::reset();
     Ok(())
 }
 

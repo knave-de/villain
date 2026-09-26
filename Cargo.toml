@@ -6,11 +6,11 @@ description = "A tiling-first Wayland compositor and window manager for the Knav
 license = "MIT"
 
 [workspace]
-members = ["crates/villain-ipc", "crates/villainctl"]
+members = []
 resolver = "3"
 
 [dependencies]
-serde = { version = "1", features = ["derive"] }
+libc = "0.2"
 toml = "0.9"
 smithay = { version = "0.7.0", default-features = false, features = [
     "backend_winit",
@@ -26,7 +26,8 @@ smithay = { version = "0.7.0", default-features = false, features = [
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 xcursor = "0.3.11"
-villain-ipc = { path = "crates/villain-ipc" }
+knave-desktop-api = { git = "https://github.com/knave-de/knave.git", rev = "15c8ede" }
+knave-config = { git = "https://github.com/knave-de/knave.git", rev = "15c8ede" }
 serde_json = "1"
 base64 = "0.22"
 png = "0.18"

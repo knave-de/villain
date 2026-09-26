@@ -121,10 +121,10 @@ fn find(state: &Villain, app: &str) -> WindowInfo {
 fn mapped(state: &Villain, app: &str) -> bool {
     let info = find(state, app);
     state
-        .workspace_layout(info.workspace - 1)
+        .workspace_layout(info.workspace.0 as usize - 1)
         .into_iter()
         .find(|(window, _, _, _, _)| {
-            state.workspaces[info.workspace - 1]
+            state.workspaces[info.workspace.0 as usize - 1]
                 .windows
                 .iter()
                 .any(|entry| entry.id == info.id && entry.window == *window)
@@ -300,7 +300,7 @@ fn wayland_floating_and_fullscreen_requests() {
         late.commit();
         settle(&mut queue, &mut client);
         inspect(&sender, |state| {
-            assert_eq!(find(state, "late-dialog").workspace, 1);
+            assert_eq!(find(state, "late-dialog").workspace.0, 1);
             assert!(find(state, "late-dialog").floating);
             assert!(!mapped(state, "late-dialog"));
         });
