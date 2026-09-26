@@ -80,10 +80,10 @@ environment_file, and bind entries. Knave projects the old root-level
 modkey, environment_file, [input], and [[bind]] keys when that table is
 absent, preserving the source document for rollback. Villain never writes a
 second configuration store. Villain receives the validated projection during
-session startup and reload; legacy compatibility is migration-only and must
+session startup and reload; root-level compatibility is migration-only and must
 not silently delete old values.
 
-The tracked `config.example.toml` is a legacy migration/test fixture only; it
+The tracked `config.example.toml` is a root-level migration/test fixture only; it
 is not loaded or installed by Villain. Create and edit the canonical Knave
 configuration instead.
 
