@@ -48,6 +48,7 @@ impl KeybindRegistry {
             spec("MOD", "exec", &["knave-shell", "overview"]),
             spec("MOD+RETURN", "exec", &["kitty"]),
             spec("MOD+Q", "close", &[]),
+            spec("MOD+F", "toggle-maximize", &[]),
             spec("MOD+M", "minimize", &[]),
             spec("MOD+SHIFT+M", "restore-minimized", &[]),
             spec("MOD+LEFT", "previous-workspace", &[]),
@@ -221,6 +222,9 @@ fn parse_keys(value: &str, modkey: Modkey) -> Result<KeyCombination, String> {
 fn parse_dispatch(spec: &BindSpec) -> Result<Dispatch, String> {
     match spec.dispatch.as_str() {
         "close" if spec.args.is_empty() => Ok(Dispatch::CloseFocused),
+        "maximize" if spec.args.is_empty() => Ok(Dispatch::MaximizeFocused),
+        "unmaximize" if spec.args.is_empty() => Ok(Dispatch::UnmaximizeFocused),
+        "toggle-maximize" if spec.args.is_empty() => Ok(Dispatch::ToggleMaximizeFocused),
         "minimize" if spec.args.is_empty() => Ok(Dispatch::MinimizeFocused),
         "restore-minimized" if spec.args.is_empty() => Ok(Dispatch::RestoreLastMinimized),
         "previous-workspace" if spec.args.is_empty() => Ok(Dispatch::PreviousWorkspace),
@@ -236,8 +240,10 @@ fn parse_dispatch(spec: &BindSpec) -> Result<Dispatch, String> {
             }
             Ok(Dispatch::FocusWorkspace(workspace))
         }
-        "close" | "minimize" | "restore-minimized" | "previous-workspace" | "next-workspace"
-        | "quit" => Err("dispatch does not accept arguments".into()),
+        "maximize" | "unmaximize" | "toggle-maximize" | "close" | "minimize"
+        | "restore-minimized" | "previous-workspace" | "next-workspace" | "quit" => {
+            Err("dispatch does not accept arguments".into())
+        }
         "exec" => Err("exec requires a program in args".into()),
         "workspace" => Err("workspace requires exactly one argument".into()),
         dispatch => Err(format!("unknown dispatch {dispatch:?}")),
@@ -395,6 +401,22 @@ mod tests {
                 "overview".into()
             ]))
         );
+    }
+
+    #[test]
+    fn maximize_binding_and_explicit_actions() {
+        let registry = KeybindRegistry::defaults("Super").unwrap();
+        assert_eq!(
+            registry.find(&[Keysym::new(keysyms::KEY_f)], false, false, false, true),
+            Some(Dispatch::ToggleMaximizeFocused)
+        );
+        for name in ["maximize", "unmaximize", "toggle-maximize"] {
+            assert!(KeybindRegistry::from_specs("Super", &[spec("MOD+F", name, &[])]).is_ok());
+            assert!(
+                KeybindRegistry::from_specs("Super", &[spec("MOD+F", name, &["unexpected"])])
+                    .is_err()
+            );
+        }
     }
 
     #[test]

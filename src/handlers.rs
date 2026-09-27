@@ -87,6 +87,7 @@ impl CompositorHandler for Villain {
             // on each output.
             window.on_commit();
             self.refresh_window_hints(&window);
+            self.finish_new_window_focus(&window);
 
             if let Some(toplevel) = window.toplevel() {
                 let initial_configure_sent = with_states(surface, |states| {
@@ -199,6 +200,18 @@ impl XdgShellHandler for Villain {
 
     fn toplevel_destroyed(&mut self, surface: ToplevelSurface) {
         self.remove_window(&surface);
+    }
+
+    fn maximize_request(&mut self, surface: ToplevelSurface) {
+        if let Some(window) = self.window_for_surface(surface.wl_surface()) {
+            self.set_window_maximized(&window, true);
+        }
+    }
+
+    fn unmaximize_request(&mut self, surface: ToplevelSurface) {
+        if let Some(window) = self.window_for_surface(surface.wl_surface()) {
+            self.set_window_maximized(&window, false);
+        }
     }
 
     fn fullscreen_request(

@@ -19,6 +19,7 @@ struct Configure {
     width: i32,
     height: i32,
     fullscreen: bool,
+    maximized: bool,
     tiled: bool,
 }
 #[derive(Default)]
@@ -90,6 +91,7 @@ impl Dispatch<xdg_toplevel::XdgToplevel, usize> for Client {
                 Configure {
                     width,
                     height,
+                    maximized: states.contains(&(xdg_toplevel::State::Maximized as u32)),
                     fullscreen: states.contains(&(xdg_toplevel::State::Fullscreen as u32)),
                     tiled: states.contains(&(xdg_toplevel::State::TiledLeft as u32)),
                 },
@@ -123,13 +125,13 @@ fn mapped(state: &Villain, app: &str) -> bool {
     state
         .workspace_layout(info.workspace.0 as usize - 1)
         .into_iter()
-        .find(|(window, _, _, _, _)| {
+        .find(|(window, _, _, _, _, _)| {
             state.workspaces[info.workspace.0 as usize - 1]
                 .windows
                 .iter()
                 .any(|entry| entry.id == info.id && entry.window == *window)
         })
-        .is_some_and(|(window, _, _, _, visible)| {
+        .is_some_and(|(window, _, _, _, _, visible)| {
             visible && state.space.element_location(&window).is_some()
         })
 }
@@ -207,6 +209,157 @@ fn wayland_floating_and_fullscreen_requests() {
         );
         assert!(!client.configures[&3].tiled);
         let dialog_size = (client.configures[&3].width, client.configures[&3].height);
+        // Maximization retains the layout and dialogs, and is independent of fullscreen.
+        at.set_maximized();
+        settle(&mut queue, &mut client);
+        assert!(client.configures[&1].maximized);
+        assert!(!client.configures[&1].fullscreen && !client.configures[&1].tiled);
+        assert_eq!(
+            (client.configures[&1].width, client.configures[&1].height),
+            (800, 600)
+        );
+        inspect(&sender, |state| {
+            assert!(find(state, "primary").maximized);
+            assert!(mapped(state, "primary") && mapped(state, "dialog"));
+            assert!(!mapped(state, "other"));
+            state.focus_window(find(state, "dialog").id);
+            assert!(
+                find(state, "primary").maximized,
+                "child focus retains parent maximization"
+            );
+        });
+        // Initial parent hints arrive after get_toplevel: a new child must not
+        // restore its maximized parent, but a new unrelated application must.
+        let (child, child_xdg, child_top) = create(6, "new-child");
+        child_top.set_parent(Some(&at));
+        child.commit();
+        settle(&mut queue, &mut client);
+        inspect(&sender, |state| {
+            assert!(find(state, "primary").maximized);
+            assert!(mapped(state, "new-child"));
+            assert!(find(state, "new-child").focused);
+        });
+        child_top.destroy();
+        child_xdg.destroy();
+        child.destroy();
+        settle(&mut queue, &mut client);
+        inspect(&sender, |state| {
+            state
+                .suppressed_keys
+                .insert(smithay::input::keyboard::Keycode::new(125));
+        });
+        let (launched, launched_xdg, launched_top) = create(7, "new-app");
+        launched.commit();
+        settle(&mut queue, &mut client);
+        inspect(&sender, |state| {
+            assert!(!find(state, "primary").maximized);
+            assert!(mapped(state, "new-app"));
+            assert!(state.pending_focus_restore);
+            state.suppressed_keys.clear();
+            state.flush_pending_focus();
+            assert!(find(state, "new-app").focused);
+            assert!(mapped(state, "primary") && mapped(state, "other"));
+        });
+        launched_top.destroy();
+        launched_xdg.destroy();
+        launched.destroy();
+        settle(&mut queue, &mut client);
+        at.set_maximized();
+        settle(&mut queue, &mut client);
+        b.commit();
+        settle(&mut queue, &mut client);
+        inspect(&sender, |state| {
+            assert!(find(state, "primary").maximized);
+            assert!(!mapped(state, "other"));
+        });
+        // A late first commit on a workspace we have left must not change it.
+        let (late_map, late_map_xdg, late_map_top) = create(8, "late-map");
+        settle(&mut queue, &mut client);
+        inspect(&sender, |state| state.switch_workspace(4));
+        late_map.commit();
+        settle(&mut queue, &mut client);
+        inspect(&sender, |state| {
+            assert_eq!(state.active_workspace, 4);
+            assert!(find(state, "primary").maximized);
+            assert!(!mapped(state, "late-map"));
+        });
+        late_map_top.destroy();
+        late_map_xdg.destroy();
+        late_map.destroy();
+        settle(&mut queue, &mut client);
+        inspect(&sender, |state| state.switch_workspace(0));
+        client.configures.remove(&1);
+        at.set_maximized();
+        settle(&mut queue, &mut client);
+        assert!(
+            client.configures[&1].maximized,
+            "repeated requests receive configure"
+        );
+        at.set_fullscreen(None);
+        settle(&mut queue, &mut client);
+        assert!(client.configures[&1].fullscreen && client.configures[&1].maximized);
+        let (full_hidden, full_hidden_xdg, full_hidden_top) = create(9, "fullscreen-hidden");
+        full_hidden.commit();
+        settle(&mut queue, &mut client);
+        inspect(&sender, |state| {
+            assert!(find(state, "primary").fullscreen && find(state, "primary").maximized);
+            assert!(!mapped(state, "fullscreen-hidden"));
+        });
+        full_hidden_top.destroy();
+        full_hidden_xdg.destroy();
+        full_hidden.destroy();
+        settle(&mut queue, &mut client);
+        at.unset_fullscreen();
+        settle(&mut queue, &mut client);
+        assert!(!client.configures[&1].fullscreen && client.configures[&1].maximized);
+        at.unset_maximized();
+        settle(&mut queue, &mut client);
+        assert!(!client.configures[&1].maximized && client.configures[&1].tiled);
+        assert_eq!(client.configures[&1].width, 400);
+        // A floating dialog retains its exact pre-maximize geometry.
+        dt.set_maximized();
+        settle(&mut queue, &mut client);
+        assert!(client.configures[&3].maximized);
+        dt.unset_maximized();
+        settle(&mut queue, &mut client);
+        assert_eq!(
+            (client.configures[&3].width, client.configures[&3].height),
+            dialog_size
+        );
+        inspect(&sender, |state| {
+            use crate::dispatch::Dispatch;
+            let primary = find(state, "primary").id;
+            state.focus_window(primary);
+            state.dispatch(Dispatch::MaximizeFocused).unwrap();
+            assert!(state.minimize_focused_window());
+            assert!(find(state, "primary").maximized && mapped(state, "other"));
+            assert!(state.restore_last_minimized_window());
+            assert!(find(state, "primary").maximized && mapped(state, "primary"));
+            assert!(!mapped(state, "other"));
+            state.focus_window(find(state, "other").id);
+            assert!(!find(state, "primary").maximized);
+            assert!(mapped(state, "primary") && mapped(state, "other"));
+            state.dispatch(Dispatch::ToggleMaximizeFocused).unwrap();
+            assert!(find(state, "other").maximized);
+            state.dispatch(Dispatch::ToggleMaximizeFocused).unwrap();
+            assert!(!find(state, "other").maximized);
+            state.dispatch(Dispatch::UnmaximizeFocused).unwrap();
+            state.switch_workspace(4);
+            assert!(state.dispatch(Dispatch::MaximizeFocused).is_err());
+        });
+        // Background requests configure only their workspace and do not steal focus.
+        bt.set_maximized();
+        settle(&mut queue, &mut client);
+        assert!(client.configures[&2].maximized);
+        inspect(&sender, |state| {
+            assert_eq!(state.active_workspace, 4);
+            assert!(!mapped(state, "other"));
+            state.switch_workspace(0);
+            assert!(mapped(state, "other") && !mapped(state, "primary"));
+            assert!(state.maximize_focused_window(Some(false)));
+        });
+        settle(&mut queue, &mut client);
+
         at.set_fullscreen(None);
         settle(&mut queue, &mut client);
         assert!(client.configures[&1].fullscreen && !client.configures[&1].tiled);
@@ -304,6 +457,7 @@ fn wayland_floating_and_fullscreen_requests() {
             assert!(find(state, "late-dialog").floating);
             assert!(!mapped(state, "late-dialog"));
         });
+        at.set_maximized();
         at.set_fullscreen(None);
         settle(&mut queue, &mut client);
         at.destroy();
@@ -314,6 +468,7 @@ fn wayland_floating_and_fullscreen_requests() {
             state.switch_workspace(0);
             assert!(mapped(state, "other"));
             assert!(!state.workspace_has_fullscreen(0));
+            assert!(state.workspaces[0].maximized.is_none());
             assert!(find(state, "other").focused);
         });
     });

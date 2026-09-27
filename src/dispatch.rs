@@ -11,6 +11,9 @@ pub enum Dispatch {
     ReloadConfig,
     CloseFocused,
     MinimizeFocused,
+    MaximizeFocused,
+    UnmaximizeFocused,
+    ToggleMaximizeFocused,
     RestoreLastMinimized,
     FocusWorkspace(usize),
     PreviousWorkspace,
@@ -26,6 +29,9 @@ impl From<DesktopCommand> for Dispatch {
         match request {
             DesktopCommand::ReloadConfiguration => Self::ReloadConfig,
             DesktopCommand::CloseFocused => Self::CloseFocused,
+            DesktopCommand::MaximizeFocused => Self::MaximizeFocused,
+            DesktopCommand::UnmaximizeFocused => Self::UnmaximizeFocused,
+            DesktopCommand::ToggleMaximizeFocused => Self::ToggleMaximizeFocused,
             DesktopCommand::MinimizeFocused => Self::MinimizeFocused,
             DesktopCommand::RestoreLastMinimized => Self::RestoreLastMinimized,
             DesktopCommand::FocusWorkspace { workspace } => {
@@ -95,6 +101,18 @@ impl Villain {
             }
             Dispatch::CloseFocused => self
                 .close_focused_window()
+                .then_some(())
+                .ok_or(DispatchError::NoFocusedWindow),
+            Dispatch::MaximizeFocused => self
+                .maximize_focused_window(Some(true))
+                .then_some(())
+                .ok_or(DispatchError::NoFocusedWindow),
+            Dispatch::UnmaximizeFocused => self
+                .maximize_focused_window(Some(false))
+                .then_some(())
+                .ok_or(DispatchError::NoFocusedWindow),
+            Dispatch::ToggleMaximizeFocused => self
+                .maximize_focused_window(None)
                 .then_some(())
                 .ok_or(DispatchError::NoFocusedWindow),
             Dispatch::MinimizeFocused => self
