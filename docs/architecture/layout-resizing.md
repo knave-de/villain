@@ -35,11 +35,10 @@ knavectl IPC commands.
 ## Compatibility and rollback
 
 Existing configs retain 50/50. Publish/deploy the Knave config commit before
-Villain's dependency pin. The current linked branches are local; a fresh clone
-needs that commit published, or a local Cargo patch to the matching knave-config
-checkout. The exact git pin was verified through Cargo's local git cache, with
-no committed filesystem override. No API, schema or binary version increment
-is needed for this optional schema-1 setting. Old Knave preserves the unknown
+Villain's dependency pin. For development before publication, use a local Cargo
+patch to the matching knave-config checkout. The exact git pin was verified
+through Cargo's local git cache, with no committed filesystem override. No API,
+schema or binary version increment is needed for this optional schema-1 setting. Old Knave preserves the unknown
 scalar setting; old Villain ignores it. Rolling back Villain requires removing
 new actions from custom binding sets, since old dispatch parsers reject them.
 Leave the new percentage setting in place or remove it explicitly.
