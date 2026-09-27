@@ -228,6 +228,66 @@ fn wayland_floating_and_fullscreen_requests() {
                 "child focus retains parent maximization"
             );
         });
+        // Initial parent hints arrive after get_toplevel: a new child must not
+        // restore its maximized parent, but a new unrelated application must.
+        let (child, child_xdg, child_top) = create(6, "new-child");
+        child_top.set_parent(Some(&at));
+        child.commit();
+        settle(&mut queue, &mut client);
+        inspect(&sender, |state| {
+            assert!(find(state, "primary").maximized);
+            assert!(mapped(state, "new-child"));
+            assert!(find(state, "new-child").focused);
+        });
+        child_top.destroy();
+        child_xdg.destroy();
+        child.destroy();
+        settle(&mut queue, &mut client);
+        inspect(&sender, |state| {
+            state
+                .suppressed_keys
+                .insert(smithay::input::keyboard::Keycode::new(125));
+        });
+        let (launched, launched_xdg, launched_top) = create(7, "new-app");
+        launched.commit();
+        settle(&mut queue, &mut client);
+        inspect(&sender, |state| {
+            assert!(!find(state, "primary").maximized);
+            assert!(mapped(state, "new-app"));
+            assert!(state.pending_focus_restore);
+            state.suppressed_keys.clear();
+            state.flush_pending_focus();
+            assert!(find(state, "new-app").focused);
+            assert!(mapped(state, "primary") && mapped(state, "other"));
+        });
+        launched_top.destroy();
+        launched_xdg.destroy();
+        launched.destroy();
+        settle(&mut queue, &mut client);
+        at.set_maximized();
+        settle(&mut queue, &mut client);
+        b.commit();
+        settle(&mut queue, &mut client);
+        inspect(&sender, |state| {
+            assert!(find(state, "primary").maximized);
+            assert!(!mapped(state, "other"));
+        });
+        // A late first commit on a workspace we have left must not change it.
+        let (late_map, late_map_xdg, late_map_top) = create(8, "late-map");
+        settle(&mut queue, &mut client);
+        inspect(&sender, |state| state.switch_workspace(4));
+        late_map.commit();
+        settle(&mut queue, &mut client);
+        inspect(&sender, |state| {
+            assert_eq!(state.active_workspace, 4);
+            assert!(find(state, "primary").maximized);
+            assert!(!mapped(state, "late-map"));
+        });
+        late_map_top.destroy();
+        late_map_xdg.destroy();
+        late_map.destroy();
+        settle(&mut queue, &mut client);
+        inspect(&sender, |state| state.switch_workspace(0));
         client.configures.remove(&1);
         at.set_maximized();
         settle(&mut queue, &mut client);
@@ -238,6 +298,17 @@ fn wayland_floating_and_fullscreen_requests() {
         at.set_fullscreen(None);
         settle(&mut queue, &mut client);
         assert!(client.configures[&1].fullscreen && client.configures[&1].maximized);
+        let (full_hidden, full_hidden_xdg, full_hidden_top) = create(9, "fullscreen-hidden");
+        full_hidden.commit();
+        settle(&mut queue, &mut client);
+        inspect(&sender, |state| {
+            assert!(find(state, "primary").fullscreen && find(state, "primary").maximized);
+            assert!(!mapped(state, "fullscreen-hidden"));
+        });
+        full_hidden_top.destroy();
+        full_hidden_xdg.destroy();
+        full_hidden.destroy();
+        settle(&mut queue, &mut client);
         at.unset_fullscreen();
         settle(&mut queue, &mut client);
         assert!(!client.configures[&1].fullscreen && client.configures[&1].maximized);

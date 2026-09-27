@@ -6,7 +6,7 @@ Villain owns maximization, client protocol requests, layout and focus. Knave
 owns additive API 1.1 commands and window metadata. Shell presentation and its
 polling remain unchanged. No new timer, worker, subscription or persistent
 configuration is introduced; the additional runtime state is one optional
-window ID per workspace and bounded layout inspection.
+window ID per workspace, one initial-focus flag per window, and bounded layout inspection.
 
 One maximized window per workspace fills `usable_area`, preserving layer-shell
 exclusive zones. Its original tiled ordering or floating rectangle stays in
@@ -15,7 +15,12 @@ Fullscreen overrides maximized geometry without discarding the saved state;
 leaving fullscreen returns to maximization. Unmaximizing never exits fullscreen.
 Minimizing preserves maximization until restoration, replacement by another
 maximized window, or destruction. Explicitly focusing a hidden unrelated window
-clears the expanded workspace states and restores the normal layout. Application
+clears the expanded workspace states and restores the normal layout. Opening a
+new unrelated application on the active workspace also clears maximization;
+native clients do this once at their first commit, after parent hints are known,
+and X11 clients do it at map time. New child dialogs retain parent maximization.
+Background creation and ordinary later commits cannot repeat that policy, and
+application fullscreen is not cleared by new-window activation. Application
 requests on background workspaces do not switch workspaces. Move/resize requests
 are ignored while maximized so they cannot overwrite the saved rectangle.
 
@@ -75,3 +80,13 @@ is dispatch throughput, not presentation latency. No sustained resource growth
 was observed in this short run. Context switches are a wakeup proxy, not an
 exhaustive count of GPU/driver wakeups. These samples do not establish long-run
 or direct-TTY performance. No physical VT, monitor or installed binary was tested.
+
+The review follow-up reproduced the hidden-new-window failure before the fix.
+Extended Wayland/XWayland regressions now cover unrelated application creation,
+new child dialogs, modifier-held focus, delayed background initial commits,
+ordinary redraws and fullscreen preservation; all 28 tests pass. A nested run
+confirmed a newly launched Kitty restores the layout and receives focus, then
+passed the frame-callback probe and 250 toggles. After settling, the three-second
+sample held 10 threads, one XWayland child, 43 FDs and 112344 KiB RSS, with zero
+additional CPU ticks and five main-thread context switches. Clean shutdown
+removed the IPC socket. Direct-TTY behavior remains unverified.

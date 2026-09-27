@@ -764,6 +764,55 @@ mod tests {
             800
         );
         let first_window = state.window_for_x11_id(first).unwrap();
+        let new_child = create(false, Some(first));
+        pump_until(&mut event_loop, &mut state, |state| {
+            state
+                .window_for_x11_id(new_child)
+                .is_some_and(|window| window.x11_surface().unwrap().wl_surface().is_some())
+        });
+        assert!(first_window.x11_surface().unwrap().is_maximized());
+        assert!(
+            state
+                .space
+                .element_location(&state.window_for_x11_id(new_child).unwrap())
+                .is_some()
+        );
+        assert_eq!(
+            conn.get_input_focus().unwrap().reply().unwrap().focus,
+            new_child
+        );
+        conn.destroy_window(new_child).unwrap();
+        conn.flush().unwrap();
+        pump_until(&mut event_loop, &mut state, |state| {
+            state.window_for_x11_id(new_child).is_none()
+        });
+        let new_app = create(false, None);
+        pump_until(&mut event_loop, &mut state, |state| {
+            state
+                .window_for_x11_id(new_app)
+                .is_some_and(|window| window.x11_surface().unwrap().wl_surface().is_some())
+        });
+        assert!(!first_window.x11_surface().unwrap().is_maximized());
+        assert!(
+            state
+                .space
+                .element_location(&state.window_for_x11_id(new_app).unwrap())
+                .is_some()
+        );
+        assert_eq!(
+            conn.get_input_focus().unwrap().reply().unwrap().focus,
+            new_app
+        );
+        conn.destroy_window(new_app).unwrap();
+        conn.flush().unwrap();
+        pump_until(&mut event_loop, &mut state, |state| {
+            state.window_for_x11_id(new_app).is_none()
+        });
+        maximize(first, true);
+        pump_until(&mut event_loop, &mut state, |_| {
+            first_window.x11_surface().unwrap().is_maximized()
+        });
+
         assert!(!first_window.x11_surface().unwrap().is_fullscreen());
         assert!(state.space.element_location(&dialog_window).is_some());
         fullscreen(first, true);

@@ -27,6 +27,7 @@ struct WorkspaceWindow {
     id: WindowId,
     window: Window,
     minimized: bool,
+    initial_focus_pending: bool,
     parent: Option<WindowId>,
     floating: Option<Rectangle<i32, smithay::utils::Logical>>,
 }
@@ -617,6 +618,7 @@ impl Villain {
             id,
             window: window.clone(),
             minimized: false,
+            initial_focus_pending: true,
             parent: None,
             floating: None,
         });
@@ -626,8 +628,50 @@ impl Villain {
         self.remember_focused_window(&window);
         if index == self.active_workspace {
             self.relayout_active_workspace();
-            self.focus_managed_window(&window);
+            if window.toplevel().is_some() {
+                self.focus_managed_window(&window);
+            }
         }
+        if window.x11_surface().is_some() {
+            self.finish_new_window_focus(&window);
+        }
+    }
+
+    /// Native parent hints are only complete at the first commit; X11 supplies
+    /// them at map time. Later redraws must never repeat this activation policy.
+    pub fn finish_new_window_focus(&mut self, window: &Window) {
+        let Some(index) = self.workspace_for_window(window) else {
+            return;
+        };
+        let Some(entry) = self.workspaces[index]
+            .windows
+            .iter_mut()
+            .find(|entry| entry.window == *window)
+        else {
+            return;
+        };
+        if !std::mem::take(&mut entry.initial_focus_pending) || index != self.active_workspace {
+            return;
+        }
+        let workspace = &self.workspaces[index];
+        let entry = workspace
+            .windows
+            .iter()
+            .find(|entry| entry.window == *window)
+            .unwrap();
+        let reveal = !self.workspace_has_fullscreen(index)
+            && !entry.minimized
+            && !workspace.hidden_by_parent(entry)
+            && !self.window_is_visible(index, entry.id)
+            && workspace
+                .maximized
+                .is_some_and(|owner| owner != entry.id && !workspace.descendant_of(entry, owner));
+        if reveal {
+            self.workspaces[index].maximized = None;
+            self.relayout_active_workspace();
+            self.request_repaint();
+        }
+        self.focus_managed_window(window);
     }
 
     pub fn add_window(&mut self, surface: ToplevelSurface) {

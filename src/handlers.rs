@@ -87,6 +87,7 @@ impl CompositorHandler for Villain {
             // on each output.
             window.on_commit();
             self.refresh_window_hints(&window);
+            self.finish_new_window_focus(&window);
 
             if let Some(toplevel) = window.toplevel() {
                 let initial_configure_sent = with_states(surface, |states| {
