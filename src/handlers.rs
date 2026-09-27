@@ -193,6 +193,14 @@ impl XdgShellHandler for Villain {
         &mut self.xdg_shell_state
     }
 
+    fn title_changed(&mut self, _surface: ToplevelSurface) {
+        self.desktop_state_dirty = true;
+    }
+
+    fn app_id_changed(&mut self, _surface: ToplevelSurface) {
+        self.desktop_state_dirty = true;
+    }
+
     fn new_toplevel(&mut self, surface: ToplevelSurface) {
         tracing::info!("client created a toplevel surface");
         self.add_window(surface);

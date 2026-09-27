@@ -1,13 +1,20 @@
 //! JSON-lines server for Knave’s versioned desktop contract.
 
+mod subscriptions;
+use subscriptions::{Subscriber, Subscriptions};
+
 use std::{
+    cell::RefCell,
     ffi::OsStr,
     fs,
     io::{BufRead, BufReader, Write},
+    net::Shutdown,
     os::unix::{fs::FileTypeExt, net::UnixListener},
     path::{Path, PathBuf},
-    sync::mpsc,
+    rc::Rc,
+    sync::{Arc, mpsc},
     thread,
+    time::Duration,
 };
 
 use base64::Engine;
@@ -15,32 +22,62 @@ use knave_desktop_api::{
     API_VERSION, DesktopError, DesktopErrorCode, DesktopQuery, DesktopRequest, DesktopResponse,
     DesktopSnapshot, ProtocolVersion, WorkspaceId, WorkspacePreview, socket_path_for_display,
 };
-use smithay::reexports::calloop::{EventLoop, channel};
+use smithay::reexports::calloop::{
+    EventLoop, Interest, LoopHandle, Mode, PostAction, RegistrationToken, channel, generic::Generic,
+};
 
 use crate::{
     dispatch::{Dispatch, DispatchError},
     state::Villain,
 };
 
+enum IpcMessage {
+    Request(Envelope),
+    Finished(u64),
+}
+
 struct Envelope {
     request: DesktopRequest,
-    response: mpsc::Sender<DesktopResponse>,
+    response: mpsc::Sender<Reply>,
+    subscriber: Option<Arc<Subscriber>>,
 }
 
+enum Reply {
+    Response(DesktopResponse),
+    Subscribed(Arc<[u8]>),
+}
+struct ClientWorker {
+    id: u64,
+    socket: std::os::unix::net::UnixStream,
+    thread: thread::JoinHandle<()>,
+}
 pub struct IpcServer {
     path: PathBuf,
+    subscriptions: Subscriptions,
+    clients: Rc<RefCell<Vec<ClientWorker>>>,
+    handle: LoopHandle<'static, Villain>,
+    listener: RegistrationToken,
+    requests: RegistrationToken,
 }
-
 const MAX_CLIENTS: usize = 16;
-
+const IO_TIMEOUT: Duration = Duration::from_secs(2);
 impl Drop for IpcServer {
     fn drop(&mut self) {
+        self.handle.remove(self.listener);
+        self.handle.remove(self.requests);
+        let clients = self.clients.take();
+        for client in &clients {
+            let _ = client.socket.shutdown(Shutdown::Both);
+        }
+        for client in clients {
+            let _ = client.thread.join();
+        }
         remove_socket(&self.path);
     }
 }
 
 pub fn init(
-    event_loop: &mut EventLoop<Villain>,
+    event_loop: &mut EventLoop<'static, Villain>,
     display: &OsStr,
 ) -> Result<IpcServer, Box<dyn std::error::Error>> {
     let runtime = std::env::var_os("XDG_RUNTIME_DIR").ok_or_else(|| {
@@ -61,53 +98,116 @@ pub fn init(
     std::os::unix::fs::PermissionsExt::set_mode(&mut permissions, 0o600);
     fs::set_permissions(&path, permissions)?;
 
-    let (sender, receiver) = channel::channel::<Envelope>();
-    event_loop
+    listener.set_nonblocking(true)?;
+    let (sender, receiver) = channel::channel::<IpcMessage>();
+    let requests = event_loop
         .handle()
         .insert_source(receiver, |event, _, state| {
-            if let channel::Event::Msg(envelope) = event {
-                let response = state.handle_ipc(envelope.request);
-                let _ = envelope.response.send(response);
+            let envelope = match event {
+                channel::Event::Msg(IpcMessage::Request(envelope)) => envelope,
+                channel::Event::Msg(IpcMessage::Finished(id)) => {
+                    let mut clients = state.ipc_server.clients.borrow_mut();
+                    if let Some(index) = clients.iter().position(|client| client.id == id) {
+                        let client = clients.swap_remove(index);
+                        // The worker has finished socket I/O before sending completion.
+                        let _ = client.thread.join();
+                    }
+                    return;
+                }
+                channel::Event::Closed => return,
+            };
+            {
+                let reply = match envelope.request {
+                    DesktopRequest::Subscribe { protocol } => {
+                        if protocol.major != API_VERSION.major
+                            || protocol.minor < 2
+                            || protocol.minor > API_VERSION.minor
+                        {
+                            Reply::Response(DesktopResponse::Error(DesktopError {
+                                code: DesktopErrorCode::IncompatibleVersion,
+                                message: "Snapshot subscriptions require desktop API 1.2".into(),
+                                retryable: false,
+                            }))
+                        } else if let Some(subscriber) = envelope.subscriber {
+                            state.publish_desktop_state();
+                            state.ipc_server.subscriptions.subscribe(&subscriber);
+                            Reply::Subscribed(state.ipc_server.subscriptions.frame())
+                        } else {
+                            Reply::Response(invalid_request(
+                                "Missing subscription transport".into(),
+                            ))
+                        }
+                    }
+                    request => Reply::Response(state.handle_ipc(request)),
+                };
+                let _ = envelope.response.send(reply);
             }
         })?;
-
-    let (available_slots, slots) = mpsc::sync_channel(MAX_CLIENTS);
-    for _ in 0..MAX_CLIENTS {
-        available_slots
-            .send(())
-            .expect("client slot channel is newly created");
-    }
-
-    thread::Builder::new()
-        .name("knave-desktop-ipc".into())
-        .spawn(move || {
-            for stream in listener.incoming() {
-                let Ok(stream) = stream else {
-                    break;
-                };
-                let Ok(slot) = slots.recv() else {
-                    break;
-                };
-                let sender = sender.clone();
-                let worker_slots = available_slots.clone();
-                if thread::Builder::new()
-                    .name("knave-desktop-client".into())
-                    .spawn(move || {
-                        serve_connection(stream, sender);
-                        let _ = worker_slots.send(slot);
-                    })
-                    .is_err()
-                {
-                    let _ = available_slots.send(slot);
+    let clients = Rc::new(RefCell::new(Vec::<ClientWorker>::new()));
+    let accept_clients = clients.clone();
+    let mut next_client = 0u64;
+    let listener_token = event_loop.handle().insert_source(
+        Generic::new(listener, Interest::READ, Mode::Level),
+        move |_, listener, _| {
+            let mut clients = accept_clients.borrow_mut();
+            let mut index = 0;
+            while index < clients.len() {
+                if clients[index].thread.is_finished() {
+                    let _ = clients.swap_remove(index).thread.join();
+                } else {
+                    index += 1;
                 }
             }
-        })?;
-
+            // Limit work per callback so a connection flood cannot starve rendering.
+            for _ in 0..MAX_CLIENTS {
+                let (stream, _) = match listener.accept() {
+                    Ok(client) => client,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => break,
+                    Err(error) => {
+                        tracing::warn!(%error, "desktop IPC accept failed");
+                        break;
+                    }
+                };
+                if clients.len() >= MAX_CLIENTS {
+                    continue;
+                }
+                stream.set_write_timeout(Some(IO_TIMEOUT))?;
+                let control = stream.try_clone()?;
+                let sender = sender.clone();
+                let id = next_client;
+                next_client = next_client.wrapping_add(1);
+                match thread::Builder::new()
+                    .name("knave-desktop-client".into())
+                    .spawn(move || {
+                        serve_connection(stream, sender.clone());
+                        let _ = sender.send(IpcMessage::Finished(id));
+                    }) {
+                    Ok(thread) => clients.push(ClientWorker {
+                        id,
+                        socket: control,
+                        thread,
+                    }),
+                    Err(error) => tracing::warn!(%error, "could not start desktop IPC client"),
+                }
+            }
+            Ok(PostAction::Continue)
+        },
+    )?;
     tracing::info!(path = %path.display(), "Knave desktop IPC listening");
-    Ok(IpcServer { path })
+    Ok(IpcServer {
+        path,
+        subscriptions: Subscriptions::default(),
+        clients,
+        handle: event_loop.handle(),
+        listener: listener_token,
+        requests,
+    })
 }
 
-fn serve_connection(mut stream: std::os::unix::net::UnixStream, sender: channel::Sender<Envelope>) {
+fn serve_connection(
+    mut stream: std::os::unix::net::UnixStream,
+    sender: channel::Sender<IpcMessage>,
+) {
     let Ok(reader_stream) = stream.try_clone() else {
         return;
     };
@@ -121,28 +221,61 @@ fn serve_connection(mut stream: std::os::unix::net::UnixStream, sender: channel:
         let request = match serde_json::from_str(&line) {
             Ok(request) => request,
             Err(error) => {
-                let response = invalid_request(format!("invalid request: {error}"));
-                if write_response(&mut stream, &response).is_err() {
+                if write_response(
+                    &mut stream,
+                    &invalid_request(format!("invalid request: {error}")),
+                )
+                .is_err()
+                {
                     return;
                 }
                 continue;
             }
         };
-        let (response_sender, response_receiver) = mpsc::channel();
+        let subscription = if matches!(request, DesktopRequest::Subscribe { .. }) {
+            match Subscriber::new() {
+                Ok(subscription) => Some(subscription),
+                Err(error) => {
+                    tracing::warn!(%error, "could not create subscription wake socket");
+                    return;
+                }
+            }
+        } else {
+            None
+        };
+        let (response, receive) = mpsc::channel();
         if sender
-            .send(Envelope {
+            .send(IpcMessage::Request(Envelope {
                 request,
-                response: response_sender,
-            })
+                response,
+                subscriber: subscription.as_ref().map(|(s, _)| s.clone()),
+            }))
             .is_err()
         {
             return;
         }
-        let Ok(response) = response_receiver.recv() else {
-            return;
-        };
-        if write_response(&mut stream, &response).is_err() {
-            return;
+        match receive.recv_timeout(IO_TIMEOUT) {
+            Ok(Reply::Response(response)) => {
+                if write_response(&mut stream, &response).is_err() {
+                    return;
+                }
+            }
+            Ok(Reply::Subscribed(initial)) => {
+                if stream.write_all(&initial).is_err() {
+                    return;
+                }
+                if let Some((subscriber, mut wake)) = subscription {
+                    // Reject pipelined requests buffered before switching to streaming mode.
+                    if !reader.buffer().is_empty() {
+                        return;
+                    }
+                    if let Err(error) = subscriptions::serve(&mut stream, &mut wake, &subscriber) {
+                        tracing::debug!(%error, "desktop subscription ended");
+                    }
+                }
+                return;
+            }
+            Err(_) => return,
         }
     }
 }
@@ -185,18 +318,39 @@ fn dispatch_error(error: DispatchError) -> DesktopResponse {
 }
 
 impl Villain {
+    pub(crate) fn publish_desktop_state(&mut self) {
+        if !self.desktop_state_dirty && self.ipc_server.subscriptions.snapshot.is_some() {
+            return;
+        }
+        self.desktop_state_dirty = false;
+        let snapshot = DesktopSnapshot {
+            generation: 0,
+            workspaces: self.workspace_info(),
+            windows: self.window_info(),
+        };
+        self.ipc_server.subscriptions.publish(snapshot);
+    }
+
     fn handle_ipc(&mut self, request: DesktopRequest) -> DesktopResponse {
         match request {
+            DesktopRequest::Subscribe { .. } => {
+                invalid_request("Subscribe requires a dedicated transport".into())
+            }
             DesktopRequest::Dispatch(command) => match self.dispatch(Dispatch::from(command)) {
                 Ok(()) => DesktopResponse::Ok,
                 Err(error) => dispatch_error(error),
             },
             DesktopRequest::Query(query) => match query {
-                DesktopQuery::Snapshot => DesktopResponse::Snapshot(DesktopSnapshot {
-                    generation: self.next_window_id,
-                    workspaces: self.workspace_info(),
-                    windows: self.window_info(),
-                }),
+                DesktopQuery::Snapshot => {
+                    self.publish_desktop_state();
+                    DesktopResponse::Snapshot(
+                        self.ipc_server
+                            .subscriptions
+                            .snapshot
+                            .clone()
+                            .expect("snapshot initialized"),
+                    )
+                }
                 DesktopQuery::Windows => DesktopResponse::Windows(self.window_info()),
                 DesktopQuery::Workspaces => DesktopResponse::Workspaces(self.workspace_info()),
                 DesktopQuery::ActiveWindow => {
