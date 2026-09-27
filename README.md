@@ -107,3 +107,28 @@ the direct/nested live-test coverage.
 - [Performance policy](docs/architecture/performance.md)
 - [Change-impact checklist](docs/architecture/change-impact.md)
 - [Agent instructions](AGENTS.md)
+
+## Maximize and restore
+
+`MOD+F` toggles maximization in the default binding set. Maximized windows fill
+usable workspace space, keeping layer-shell panels and application chrome.
+Fullscreen is a separate state and takes precedence while active. Unmaximizing
+restores tiled placement or saved floating geometry; minimize/restore retains
+the maximized state. Explicitly focusing an unrelated hidden window restores
+the normal layout. Child dialogs remain visible above their maximized parent.
+
+    knavectl dispatch maximize
+    knavectl dispatch unmaximize
+    knavectl dispatch toggle-maximize
+
+Custom binding sets replace the defaults. Add this to the existing canonical
+Knave configuration when using custom bindings:
+
+```toml
+[[compositor.bind]]
+keys = "MOD+F"
+dispatch = "toggle-maximize"
+```
+
+These commands require desktop API 1.1. Existing Shell clients may remain on
+API 1.0. See [maximization policy](docs/architecture/maximization.md).

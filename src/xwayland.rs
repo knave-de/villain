@@ -154,7 +154,11 @@ impl XwmHandler for Villain {
             return;
         }
         let fullscreen = window.is_fullscreen();
+        let maximized = window.is_maximized();
         self.add_x11_window(window.clone());
+        if maximized && let Some(window) = self.window_for_x11_surface(&window) {
+            self.set_window_maximized(&window, true);
+        }
         if fullscreen && let Some(window) = self.window_for_x11_surface(&window) {
             self.set_window_fullscreen(&window, true);
         }
@@ -278,6 +282,18 @@ impl XwmHandler for Villain {
         ) && let Some(window) = self.window_for_x11_surface(&surface)
         {
             self.refresh_window_hints(&window);
+        }
+    }
+
+    fn maximize_request(&mut self, _xwm: XwmId, surface: X11Surface) {
+        if let Some(window) = self.window_for_x11_surface(&surface) {
+            self.set_window_maximized(&window, true);
+        }
+    }
+
+    fn unmaximize_request(&mut self, _xwm: XwmId, surface: X11Surface) {
+        if let Some(window) = self.window_for_x11_surface(&surface) {
+            self.set_window_maximized(&window, false);
         }
     }
 
@@ -712,6 +728,75 @@ mod tests {
             .unwrap();
             conn.flush().unwrap();
         };
+        let max_h = conn
+            .intern_atom(false, b"_NET_WM_STATE_MAXIMIZED_HORZ")
+            .unwrap()
+            .reply()
+            .unwrap()
+            .atom;
+        let max_v = conn
+            .intern_atom(false, b"_NET_WM_STATE_MAXIMIZED_VERT")
+            .unwrap()
+            .reply()
+            .unwrap()
+            .atom;
+        let maximize = |id, enabled| {
+            conn.send_event(
+                false,
+                root,
+                EventMask::SUBSTRUCTURE_REDIRECT | EventMask::SUBSTRUCTURE_NOTIFY,
+                ClientMessageEvent::new(32, id, wm_state, [u32::from(enabled), max_h, max_v, 1, 0]),
+            )
+            .unwrap();
+            conn.flush().unwrap();
+        };
+        maximize(first, true);
+        pump_until(&mut event_loop, &mut state, |state| {
+            state
+                .window_for_x11_id(first)
+                .unwrap()
+                .x11_surface()
+                .unwrap()
+                .is_maximized()
+        });
+        assert_eq!(
+            conn.get_geometry(first).unwrap().reply().unwrap().width,
+            800
+        );
+        let first_window = state.window_for_x11_id(first).unwrap();
+        assert!(!first_window.x11_surface().unwrap().is_fullscreen());
+        assert!(state.space.element_location(&dialog_window).is_some());
+        fullscreen(first, true);
+        pump_until(&mut event_loop, &mut state, |_| {
+            first_window.x11_surface().unwrap().is_fullscreen()
+        });
+        fullscreen(first, false);
+        pump_until(&mut event_loop, &mut state, |_| {
+            !first_window.x11_surface().unwrap().is_fullscreen()
+        });
+        assert!(first_window.x11_surface().unwrap().is_maximized());
+        assert_eq!(
+            conn.get_geometry(first).unwrap().reply().unwrap().width,
+            800
+        );
+        maximize(first, false);
+        pump_until(&mut event_loop, &mut state, |_| {
+            !first_window.x11_surface().unwrap().is_maximized()
+        });
+        assert_eq!(
+            conn.get_geometry(first).unwrap().reply().unwrap().width,
+            400
+        );
+        maximize(dialog, true);
+        pump_until(&mut event_loop, &mut state, |_| {
+            dialog_window.x11_surface().unwrap().is_maximized()
+        });
+        assert!(state.floating_geometry(&dialog_window).is_none());
+        maximize(dialog, false);
+        pump_until(&mut event_loop, &mut state, |_| {
+            !dialog_window.x11_surface().unwrap().is_maximized()
+        });
+        assert_eq!(state.floating_geometry(&dialog_window), Some(saved));
         fullscreen(first, true);
         pump_until(&mut event_loop, &mut state, |state| {
             state

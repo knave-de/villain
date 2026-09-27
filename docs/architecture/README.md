@@ -13,3 +13,5 @@ versioning, build, and compatibility policy.
 
 These local documents describe Villain's responsibilities without duplicating
 the umbrella policy.
+
+- [Maximization policy and verification](maximization.md)

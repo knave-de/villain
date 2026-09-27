@@ -160,6 +160,7 @@ impl Villain {
                 &display_handle,
                 [
                     xdg_toplevel::WmCapabilities::Minimize,
+                    xdg_toplevel::WmCapabilities::Maximize,
                     xdg_toplevel::WmCapabilities::Fullscreen,
                 ],
             ),

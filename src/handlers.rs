@@ -201,6 +201,18 @@ impl XdgShellHandler for Villain {
         self.remove_window(&surface);
     }
 
+    fn maximize_request(&mut self, surface: ToplevelSurface) {
+        if let Some(window) = self.window_for_surface(surface.wl_surface()) {
+            self.set_window_maximized(&window, true);
+        }
+    }
+
+    fn unmaximize_request(&mut self, surface: ToplevelSurface) {
+        if let Some(window) = self.window_for_surface(surface.wl_surface()) {
+            self.set_window_maximized(&window, false);
+        }
+    }
+
     fn fullscreen_request(
         &mut self,
         surface: ToplevelSurface,

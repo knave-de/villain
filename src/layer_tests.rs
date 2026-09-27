@@ -230,6 +230,26 @@ fn layer_lifecycle_focus_and_workspace_independence() {
         inspect(&sender, |s| s.switch_workspace(0));
         settle(&mut queue, &mut client);
         assert_eq!(client.app_size, (800, 560));
+        top.set_maximized();
+        settle(&mut queue, &mut client);
+        assert_eq!(client.app_size, (800, 560));
+        inspect(&sender, |s| {
+            let info = &s.window_info()[0];
+            assert!(info.maximized && !info.fullscreen);
+            assert_eq!(
+                s.space
+                    .element_location(s.space.elements().next().unwrap())
+                    .unwrap(),
+                (0, 40).into()
+            );
+        });
+        layer.set_exclusive_zone(60);
+        surface.commit();
+        settle(&mut queue, &mut client);
+        assert_eq!(client.app_size, (800, 540));
+        layer.set_exclusive_zone(40);
+        surface.commit();
+        settle(&mut queue, &mut client);
         top.set_fullscreen(None);
         settle(&mut queue, &mut client);
         assert_eq!(client.app_size, (800, 600));
@@ -244,6 +264,10 @@ fn layer_lifecycle_focus_and_workspace_independence() {
         top.unset_fullscreen();
         settle(&mut queue, &mut client);
         assert_eq!(client.app_size, (800, 560));
+        inspect(&sender, |s| assert!(s.window_info()[0].maximized));
+        top.unset_maximized();
+        settle(&mut queue, &mut client);
+        inspect(&sender, |s| assert!(!s.window_info()[0].maximized));
         layer.set_keyboard_interactivity(layer::KeyboardInteractivity::Exclusive);
         surface.commit();
         settle(&mut queue, &mut client);

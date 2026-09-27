@@ -20,6 +20,7 @@ pub struct Workspace {
     focus_history: Vec<WindowId>,
     minimized_history: Vec<Window>,
     fullscreen: Option<WindowId>,
+    maximized: Option<WindowId>,
 }
 
 struct WorkspaceWindow {
@@ -68,7 +69,7 @@ fn master_stack_layout(
 }
 
 type Geometry = Rectangle<i32, smithay::utils::Logical>;
-type WindowPlacement = (Window, Geometry, bool, bool, bool);
+type WindowPlacement = (Window, Geometry, bool, bool, bool, bool);
 
 pub(crate) struct WorkspacePreviewScene {
     pub output_size: Size<i32, smithay::utils::Logical>,
@@ -202,6 +203,10 @@ impl Villain {
                 self.workspaces[index].fullscreen = None;
                 self.workspaces[target].fullscreen = Some(entry.id);
             }
+            if self.workspaces[index].maximized == Some(entry.id) {
+                self.workspaces[index].maximized = None;
+                self.workspaces[target].maximized = Some(entry.id);
+            }
             if entry.minimized {
                 self.workspaces[target]
                     .minimized_history
@@ -223,8 +228,8 @@ impl Villain {
             .and_then(|parent| {
                 self.workspace_layout(index)
                     .into_iter()
-                    .find(|(window, _, _, _, _)| window == parent)
-                    .map(|(_, rect, _, _, _)| rect)
+                    .find(|(window, _, _, _, _, _)| window == parent)
+                    .map(|(_, rect, _, _, _, _)| rect)
             })
             .unwrap_or_else(|| Rectangle::from_size(self.output_size));
         let entry = self.workspaces[index]
@@ -288,6 +293,12 @@ impl Villain {
                 entry.id == *id && !entry.minimized && !workspace.hidden_by_parent(entry)
             })
         });
+        let maximized = workspace.maximized.filter(|id| {
+            workspace.windows.iter().any(|entry| {
+                entry.id == *id && !entry.minimized && !workspace.hidden_by_parent(entry)
+            })
+        });
+        let exclusive = fullscreen.or(maximized);
         let count = workspace
             .windows
             .iter()
@@ -298,6 +309,7 @@ impl Villain {
         let mut result = Vec::new();
         for entry in &workspace.windows {
             let is_fullscreen = workspace.fullscreen == Some(entry.id);
+            let is_maximized = workspace.maximized == Some(entry.id);
             let base = if let Some(rect) = entry.floating {
                 let (min, max) = Self::window_constraints(&entry.window);
                 constrain_geometry(rect, self.output_size, min, max)
@@ -309,12 +321,14 @@ impl Villain {
             };
             let rect = if is_fullscreen {
                 Rectangle::from_size(self.output_size)
+            } else if is_maximized {
+                area
             } else {
                 base
             };
             let visible = !entry.minimized
                 && !workspace.hidden_by_parent(entry)
-                && fullscreen.is_none_or(|owner| {
+                && exclusive.is_none_or(|owner| {
                     owner == entry.id
                         || (entry.floating.is_some() && workspace.descendant_of(entry, owner))
                 });
@@ -322,13 +336,14 @@ impl Villain {
                 entry.window.clone(),
                 rect,
                 is_fullscreen,
+                is_maximized,
                 entry.floating.is_none(),
                 visible,
             ));
         }
-        // Map tiles first, then fullscreen, then its floating dialogs.
-        result.sort_by_key(|(_, _, fullscreen, tiled, _)| {
-            if *fullscreen {
+        // Map tiles first, then the expanded window, then its floating dialogs.
+        result.sort_by_key(|(_, _, fullscreen, maximized, tiled, _)| {
+            if *fullscreen || *maximized {
                 1
             } else if *tiled {
                 0
@@ -345,7 +360,7 @@ impl Villain {
             windows: self
                 .workspace_layout(index)
                 .into_iter()
-                .filter_map(|(window, geometry, _, _, visible)| {
+                .filter_map(|(window, geometry, _, _, _, visible)| {
                     visible.then_some((window, geometry))
                 })
                 .collect(),
@@ -353,8 +368,8 @@ impl Villain {
     }
 
     fn configure_workspace(&self, index: usize) {
-        for (window, rect, fullscreen, tiled, _) in self.workspace_layout(index) {
-            Self::configure_window(&window, rect.loc, rect.size, fullscreen, tiled);
+        for (window, rect, fullscreen, maximized, tiled, _) in self.workspace_layout(index) {
+            Self::configure_window(&window, rect.loc, rect.size, fullscreen, maximized, tiled);
         }
     }
 
@@ -390,6 +405,43 @@ impl Villain {
         }
     }
 
+    /// Maximization overlays the layout; tiled order and floating geometry stay intact.
+    pub fn set_window_maximized(&mut self, window: &Window, maximized: bool) {
+        let Some(index) = self.workspace_for_window(window) else {
+            return;
+        };
+        let Some(id) = self.window_id(window) else {
+            return;
+        };
+        if maximized == (self.workspaces[index].maximized == Some(id)) {
+            if let Some(surface) = window.toplevel() {
+                surface.send_configure();
+            }
+            return;
+        }
+        if maximized {
+            self.workspaces[index].maximized = Some(id);
+        } else {
+            self.workspaces[index].maximized = None;
+        }
+        if index == self.active_workspace {
+            self.release_pointer_buttons();
+            self.relayout_active_workspace();
+        } else {
+            self.configure_workspace(index);
+        }
+    }
+
+    pub fn maximize_focused_window(&mut self, maximized: Option<bool>) -> bool {
+        let Some(window) = self.focused_window() else {
+            return false;
+        };
+        let workspace = &self.workspaces[self.active_workspace];
+        let maximized = maximized.unwrap_or_else(|| workspace.maximized != self.window_id(&window));
+        self.set_window_maximized(&window, maximized);
+        true
+    }
+
     pub(crate) fn floating_geometry(&self, window: &Window) -> Option<Geometry> {
         let workspace = &self.workspaces[self.workspace_for_window(window)?];
         workspace
@@ -399,6 +451,7 @@ impl Villain {
                 entry.window == *window
                     && !entry.minimized
                     && workspace.fullscreen != Some(entry.id)
+                    && workspace.maximized != Some(entry.id)
             })
             .and_then(|entry| entry.floating)
     }
@@ -417,7 +470,7 @@ impl Villain {
             .find(|entry| entry.window == *window)
             .unwrap();
         entry.floating = Some(geometry);
-        Self::configure_window(window, geometry.loc, geometry.size, false, false);
+        Self::configure_window(window, geometry.loc, geometry.size, false, false, false);
         if self.space.element_location(window).is_some() {
             self.space.map_element(window.clone(), geometry.loc, false);
             self.sync_x11_stacking();
@@ -476,6 +529,7 @@ impl Villain {
         location: Point<i32, smithay::utils::Logical>,
         size: Size<i32, smithay::utils::Logical>,
         fullscreen: bool,
+        maximized: bool,
         tiled: bool,
     ) {
         if let Some(surface) = window.toplevel() {
@@ -487,11 +541,16 @@ impl Villain {
                     xdg_toplevel::State::TiledTop,
                     xdg_toplevel::State::TiledBottom,
                 ] {
-                    if tiled && !fullscreen {
+                    if tiled && !fullscreen && !maximized {
                         pending.states.set(state);
                     } else {
                         pending.states.unset(state);
                     }
+                }
+                if maximized {
+                    pending.states.set(xdg_toplevel::State::Maximized);
+                } else {
+                    pending.states.unset(xdg_toplevel::State::Maximized);
                 }
                 if fullscreen {
                     pending.states.set(xdg_toplevel::State::Fullscreen);
@@ -506,6 +565,11 @@ impl Villain {
                 && let Err(error) = surface.set_fullscreen(fullscreen)
             {
                 tracing::warn!(%error, "could not update X11 fullscreen state");
+            }
+            if surface.is_maximized() != maximized
+                && let Err(error) = surface.set_maximized(maximized)
+            {
+                tracing::warn!(%error, "could not update X11 maximized state");
             }
             let geometry = Rectangle::new(location, size);
             if surface.geometry() != geometry
@@ -621,10 +685,17 @@ impl Villain {
             self.space.unmap_elem(&window);
         }
 
-        for (window, geometry, fullscreen, tiled, visible) in
+        for (window, geometry, fullscreen, maximized, tiled, visible) in
             self.workspace_layout(self.active_workspace)
         {
-            Self::configure_window(&window, geometry.loc, geometry.size, fullscreen, tiled);
+            Self::configure_window(
+                &window,
+                geometry.loc,
+                geometry.size,
+                fullscreen,
+                maximized,
+                tiled,
+            );
             if visible {
                 self.space.map_element(window, geometry.loc, false);
             } else {
@@ -761,11 +832,12 @@ impl Villain {
         if !self
             .workspace_layout(workspace)
             .iter()
-            .any(|(window, _, _, _, visible)| {
+            .any(|(window, _, _, _, _, visible)| {
                 *visible && KeyboardFocus::for_window(window) == surface
             })
         {
             self.workspaces[workspace].fullscreen = None;
+            self.workspaces[workspace].maximized = None;
             self.relayout_active_workspace();
         }
         let Some(surface) = surface else {
@@ -845,6 +917,7 @@ impl Villain {
                         minimized: entry.minimized,
                         floating: entry.floating.is_some(),
                         fullscreen: state.fullscreen == Some(entry.id),
+                        maximized: state.maximized == Some(entry.id),
                         focused: focused
                             .as_ref()
                             .is_some_and(|focused| wl_surface.as_ref() == Some(focused)),
@@ -865,7 +938,7 @@ impl Villain {
                 visible_window_count: self
                     .workspace_layout(index)
                     .iter()
-                    .filter(|(_, _, _, _, visible)| *visible)
+                    .filter(|(_, _, _, _, _, visible)| *visible)
                     .count() as u32,
             })
             .collect()
@@ -933,7 +1006,7 @@ impl Villain {
         };
         self.workspace_layout(index)
             .into_iter()
-            .any(|(window, _, _, _, visible)| visible && window == entry.window)
+            .any(|(window, _, _, _, _, visible)| visible && window == entry.window)
     }
 
     fn last_visible_window(&self, index: usize) -> Option<Window> {
@@ -1306,6 +1379,9 @@ impl Villain {
                 workspace.fullscreen = None;
             }
             for (id, window) in removed {
+                if workspace.maximized == Some(id) {
+                    workspace.maximized = None;
+                }
                 self.space.unmap_elem(&window);
                 workspace.focus_history.retain(|candidate| *candidate != id);
                 workspace
