@@ -86,7 +86,9 @@ fn render(
     let mut framebuffer = renderer
         .bind(&mut target)
         .map_err(|error| format!("could not bind preview target: {error}"))?;
-    let mut damage = OutputDamageTracker::new(physical_size, 1.0, Transform::Normal);
+    // Surface sizes are resolved using the damage tracker scale, independently
+    // of the physical positions computed above. Both must use thumbnail scale.
+    let mut damage = OutputDamageTracker::new(physical_size, scale, Transform::Normal);
     let result = damage
         .render_output(
             renderer,
