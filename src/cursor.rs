@@ -34,6 +34,7 @@ struct CursorFrame {
 
 pub struct CursorState {
     image: CursorImageStatus,
+    split_override: bool,
     image_since: Duration,
     theme: xcursor::CursorTheme,
     size: u32,
@@ -51,11 +52,24 @@ impl CursorState {
             .unwrap_or(24);
         Self {
             image: CursorImageStatus::default_named(),
+            split_override: false,
             image_since: Duration::ZERO,
             theme: xcursor::CursorTheme::load(&theme_name),
             size,
             named: HashMap::new(),
             fallback: fallback_cursor(),
+        }
+    }
+
+    pub fn set_split_override(&mut self, active: bool) {
+        self.split_override = active;
+    }
+
+    fn effective_image(&self) -> CursorImageStatus {
+        if self.split_override {
+            CursorImageStatus::Named(CursorIcon::ColResize)
+        } else {
+            self.image.clone()
         }
     }
 
@@ -72,7 +86,7 @@ impl CursorState {
         location: Point<f64, smithay::utils::Logical>,
         now: Duration,
     ) -> Vec<CursorRenderElement> {
-        match self.image.clone() {
+        match self.effective_image() {
             CursorImageStatus::Hidden => Vec::new(),
             CursorImageStatus::Surface(surface) => {
                 let hotspot = with_states(&surface, |states| {
@@ -135,10 +149,10 @@ impl CursorState {
     }
 
     pub fn next_animation_delay(&self, now: Duration) -> Option<Duration> {
-        let CursorImageStatus::Named(icon) = &self.image else {
+        let CursorImageStatus::Named(icon) = self.effective_image() else {
             return None;
         };
-        let frames = self.named.get(icon)?;
+        let frames = self.named.get(&icon)?;
         if frames.len() < 2 {
             return None;
         }

@@ -354,6 +354,9 @@ fn process_input(event: InputEvent<LibinputInputBackend>, state: &mut Villain) {
                     }
                 }
             }
+            if state.try_start_split_drag(event.button_code(), event.state(), event.time_msec()) {
+                return;
+            }
             state.refresh_pointer_and_focus(event.time_msec());
             let pointer = state.pointer.clone();
             pointer.button(

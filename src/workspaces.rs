@@ -21,6 +21,7 @@ pub struct Workspace {
     minimized_history: Vec<Window>,
     fullscreen: Option<WindowId>,
     maximized: Option<WindowId>,
+    master_ratio: Option<u16>,
 }
 
 struct WorkspaceWindow {
@@ -41,6 +42,7 @@ pub(crate) enum WindowAction {
 fn master_stack_layout(
     output: Size<i32, smithay::utils::Logical>,
     window_count: usize,
+    ratio: u16,
 ) -> Vec<(
     Point<i32, smithay::utils::Logical>,
     Size<i32, smithay::utils::Logical>,
@@ -49,7 +51,7 @@ fn master_stack_layout(
         0 => Vec::new(),
         1 => vec![((0, 0).into(), output)],
         _ => {
-            let master_width = output.w / 2;
+            let master_width = master_width(output.w, ratio);
             let stack_width = output.w - master_width;
             let stack_count = window_count as i32 - 1;
             let stack_height = output.h / stack_count;
@@ -67,6 +69,17 @@ fn master_stack_layout(
             result
         }
     }
+}
+
+pub(crate) fn master_width(width: i32, ratio: u16) -> i32 {
+    ((i64::from(width) * i64::from(ratio.clamp(1000, 9000))) / 10000) as i32
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct SplitContext {
+    pub workspace: usize,
+    pub area: Geometry,
+    windows: Vec<WindowId>,
 }
 
 type Geometry = Rectangle<i32, smithay::utils::Logical>;
@@ -128,6 +141,104 @@ impl Workspace {
 }
 
 impl Villain {
+    pub(crate) fn master_ratio(&self, index: usize) -> u16 {
+        self.workspaces[index]
+            .master_ratio
+            .unwrap_or(u16::from(self.config.master_percent) * 100)
+    }
+
+    pub(crate) fn split_context(&self) -> Option<SplitContext> {
+        let area = self.usable_area();
+        if area.size.w < 10 || area.size.h < 1 {
+            return None;
+        }
+        let workspace = &self.workspaces[self.active_workspace];
+        if [workspace.fullscreen, workspace.maximized]
+            .into_iter()
+            .flatten()
+            .any(|id| {
+                workspace.windows.iter().any(|entry| {
+                    entry.id == id && !entry.minimized && !workspace.hidden_by_parent(entry)
+                })
+            })
+        {
+            return None;
+        }
+        let windows: Vec<_> = self.workspaces[self.active_workspace]
+            .windows
+            .iter()
+            .filter(|entry| !entry.minimized && entry.floating.is_none())
+            .map(|entry| entry.id)
+            .collect();
+        (windows.len() >= 2).then_some(SplitContext {
+            workspace: self.active_workspace,
+            area,
+            windows,
+        })
+    }
+
+    pub(crate) fn split_under_pointer(&self) -> Option<SplitContext> {
+        if !self.host_focused
+            || self.pointer.is_grabbed()
+            || self.keyboard.is_grabbed()
+            || self.exclusive_layer_focus().is_some()
+            || self.layer_under_pointer(true).is_some()
+        {
+            return None;
+        }
+        let area = self.usable_area();
+        let x = area.loc.x + master_width(area.size.w, self.master_ratio(self.active_workspace));
+        if (self.pointer_location.x - f64::from(x)).abs() > 5.0
+            || !area.to_f64().contains(self.pointer_location)
+        {
+            return None;
+        }
+        let context = self.split_context()?;
+        // Dialogs, popups and override-redirect windows keep their normal input.
+        let (window, origin) = self.space.element_under(self.pointer_location)?;
+        let entry = self.workspaces[self.active_workspace]
+            .windows
+            .iter()
+            .find(|entry| &entry.window == window)?;
+        if entry.floating.is_some() {
+            return None;
+        }
+        let (surface, _) = window.surface_under(
+            self.pointer_location - origin.to_f64(),
+            WindowSurfaceType::ALL,
+        )?;
+        let root =
+            std::iter::successors(Some(surface), smithay::wayland::compositor::get_parent).last();
+        if root != Self::window_surface(window) {
+            return None;
+        }
+        Some(context)
+    }
+
+    /// May run inside a pointer grab: do not re-enter pointer dispatch here.
+    pub(crate) fn apply_master_ratio(&mut self, ratio: Option<u16>) {
+        let before = self.master_ratio(self.active_workspace);
+        self.workspaces[self.active_workspace].master_ratio =
+            ratio.map(|value| value.clamp(1000, 9000));
+        if self.master_ratio(self.active_workspace) != before {
+            self.map_active_workspace();
+            self.request_repaint();
+        }
+    }
+
+    pub(crate) fn resize_master(&mut self, delta: Option<i16>) {
+        if self.split_context().is_none() {
+            return;
+        }
+        self.release_pointer_buttons();
+        let ratio = delta.map(|delta| {
+            (i32::from(self.master_ratio(self.active_workspace)) + i32::from(delta) * 100)
+                .clamp(1000, 9000) as u16
+        });
+        self.apply_master_ratio(ratio);
+        self.refresh_pointer_surface(0);
+    }
+
     pub(crate) fn window_constraints(
         window: &Window,
     ) -> (
@@ -306,7 +417,7 @@ impl Villain {
             .filter(|entry| !entry.minimized && entry.floating.is_none())
             .count();
         let area = self.usable_area();
-        let mut tiles = master_stack_layout(area.size, count).into_iter();
+        let mut tiles = master_stack_layout(area.size, count, self.master_ratio(index)).into_iter();
         let mut result = Vec::new();
         for entry in &workspace.windows {
             let is_fullscreen = workspace.fullscreen == Some(entry.id);
@@ -719,6 +830,34 @@ impl Villain {
     }
 
     pub fn relayout_active_workspace(&mut self) {
+        self.map_active_workspace();
+        // An implicit button grab must not survive minimizing its window.
+        if self
+            .pointer
+            .current_focus()
+            .or_else(|| {
+                self.pointer
+                    .grab_start_data()
+                    .and_then(|start| start.focus.map(|(surface, _)| surface))
+            })
+            .is_some_and(|surface| {
+                let root =
+                    std::iter::successors(Some(surface), smithay::wayland::compositor::get_parent)
+                        .last()
+                        .unwrap();
+                !self.layer_surface_visible(&root)
+                    && !self
+                        .window_for_surface(&root)
+                        .is_some_and(|window| self.space.element_location(&window).is_some())
+            })
+        {
+            self.release_pointer_buttons();
+        }
+        self.refresh_pointer_surface(0);
+        self.restore_active_workspace_focus();
+    }
+
+    fn map_active_workspace(&mut self) {
         self.arrange_layers();
         let old: Vec<_> = self
             .workspaces
@@ -748,32 +887,6 @@ impl Villain {
         }
         self.refresh_unmanaged_x11_windows();
         self.sync_x11_stacking();
-        // An implicit button grab must not survive minimizing its window.
-        if self
-            .pointer
-            .current_focus()
-            .or_else(|| {
-                self.pointer
-                    .grab_start_data()
-                    .and_then(|start| start.focus.map(|(surface, _)| surface))
-            })
-            .is_some_and(|surface| {
-                let root =
-                    std::iter::successors(Some(surface), smithay::wayland::compositor::get_parent)
-                        .last()
-                        .unwrap();
-                !self.layer_surface_visible(&root)
-                    && !self
-                        .window_for_surface(&root)
-                        .is_some_and(|window| self.space.element_location(&window).is_some())
-            })
-        {
-            self.release_pointer_buttons();
-        }
-        // Workspace transitions must not let the stale pointer location choose
-        // a different application before the workspace focus policy runs.
-        self.refresh_pointer_surface(0);
-        self.restore_active_workspace_focus();
     }
 
     pub fn close_focused_window(&mut self) -> bool {
@@ -1382,6 +1495,8 @@ impl Villain {
             },
         );
         pointer.frame(self);
+        let split_cursor = self.split_drag_active || self.split_under_pointer().is_some();
+        self.cursor.set_split_override(split_cursor);
     }
 
     pub fn remove_window(&mut self, surface: &ToplevelSurface) {
@@ -1444,20 +1559,20 @@ mod tests {
     #[test]
     fn master_stack_layouts_zero_to_three_windows() {
         let output = (800, 600).into();
-        assert!(master_stack_layout(output, 0).is_empty());
+        assert!(master_stack_layout(output, 0, 5000).is_empty());
         assert_eq!(
-            master_stack_layout(output, 1),
+            master_stack_layout(output, 1, 5000),
             vec![((0, 0).into(), (800, 600).into())]
         );
         assert_eq!(
-            master_stack_layout(output, 2),
+            master_stack_layout(output, 2, 5000),
             vec![
                 ((0, 0).into(), (400, 600).into()),
                 ((400, 0).into(), (400, 600).into()),
             ]
         );
         assert_eq!(
-            master_stack_layout(output, 3),
+            master_stack_layout(output, 3, 5000),
             vec![
                 ((0, 0).into(), (400, 600).into()),
                 ((400, 0).into(), (400, 300).into()),
@@ -1467,8 +1582,24 @@ mod tests {
     }
 
     #[test]
+    fn ratios_preserve_coverage_and_single_window_ignores_split() {
+        for width in [10, 801, 1920] {
+            for ratio in [1000, 3333, 6000, 9000] {
+                let layout = master_stack_layout((width, 601).into(), 4, ratio);
+                assert_eq!(layout[0].1.w + layout[1].1.w, width);
+                assert_eq!(layout[1].0.x, layout[0].1.w);
+                assert_eq!(layout[1..].iter().map(|(_, size)| size.h).sum::<i32>(), 601);
+                assert_eq!(
+                    master_stack_layout((width, 601).into(), 1, ratio)[0].1.w,
+                    width
+                );
+            }
+        }
+    }
+
+    #[test]
     fn stack_absorbs_integer_remainders() {
-        let layout = master_stack_layout((801, 601).into(), 4);
+        let layout = master_stack_layout((801, 601).into(), 4, 5000);
         assert_eq!(layout[0], ((0, 0).into(), (400, 601).into()));
         assert_eq!(layout[3], ((400, 400).into(), (401, 201).into()));
     }

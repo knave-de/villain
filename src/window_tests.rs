@@ -3,14 +3,16 @@ use super::*;
 use smithay::reexports::{calloop::EventLoop, wayland_server::Display};
 use std::{
     collections::HashMap,
-    os::unix::net::UnixStream,
+    os::{fd::AsFd, unix::net::UnixStream},
     sync::{Arc, mpsc},
     time::{Duration, Instant},
 };
 use wayland_client::{
     Connection, Dispatch, QueueHandle, delegate_noop,
     globals::{GlobalListContents, registry_queue_init},
-    protocol::{wl_compositor, wl_registry, wl_surface},
+    protocol::{
+        wl_buffer, wl_compositor, wl_pointer, wl_registry, wl_seat, wl_shm, wl_shm_pool, wl_surface,
+    },
 };
 use wayland_protocols::xdg::shell::client::{xdg_surface, xdg_toplevel, xdg_wm_base};
 
@@ -25,6 +27,7 @@ struct Configure {
 #[derive(Default)]
 struct Client {
     configures: HashMap<usize, Configure>,
+    pointer_buttons: usize,
 }
 impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for Client {
     fn event(
@@ -99,6 +102,24 @@ impl Dispatch<xdg_toplevel::XdgToplevel, usize> for Client {
         }
     }
 }
+impl Dispatch<wl_pointer::WlPointer, ()> for Client {
+    fn event(
+        state: &mut Self,
+        _: &wl_pointer::WlPointer,
+        event: wl_pointer::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if matches!(event, wl_pointer::Event::Button { .. }) {
+            state.pointer_buttons += 1;
+        }
+    }
+}
+delegate_noop!(Client: ignore wl_shm::WlShm);
+delegate_noop!(Client: ignore wl_shm_pool::WlShmPool);
+delegate_noop!(Client: ignore wl_buffer::WlBuffer);
+delegate_noop!(Client: ignore wl_seat::WlSeat);
 delegate_noop!(Client: ignore wl_compositor::WlCompositor);
 delegate_noop!(Client: ignore wl_surface::WlSurface);
 
@@ -190,6 +211,126 @@ fn wayland_floating_and_fullscreen_requests() {
             (400, 600)
         );
         assert!(client.configures[&1].tiled);
+        // Attach real buffers so pointer hit testing follows the normal client path.
+        let shm: wl_shm::WlShm = globals.bind(&qh, 1..=1, ()).unwrap();
+        let seat: wl_seat::WlSeat = globals.bind(&qh, 1..=7, ()).unwrap();
+        let _pointer = seat.get_pointer(&qh, ());
+        let path =
+            std::env::temp_dir().join(format!("villain-split-buffer-{}", std::process::id()));
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .unwrap();
+        std::fs::remove_file(path).unwrap();
+        file.set_len(800 * 600 * 4).unwrap();
+        let pool = shm.create_pool(file.as_fd(), 800 * 600 * 4, &qh, ());
+        let buffer = pool.create_buffer(0, 400, 600, 400 * 4, wl_shm::Format::Argb8888, &qh, ());
+        a.attach(Some(&buffer), 0, 0);
+        a.commit();
+        b.attach(Some(&buffer), 0, 0);
+        b.commit();
+        settle(&mut queue, &mut client);
+        inspect(&sender, |s| {
+            use crate::dispatch::Dispatch;
+            use smithay::backend::input::ButtonState;
+            let focus = s.keyboard.current_focus();
+            s.dispatch(Dispatch::ResizeMaster(10)).unwrap();
+            assert_eq!(s.master_ratio(0), 6000);
+            assert_eq!(s.workspace_layout(0)[0].1.size.w, 480);
+            assert_eq!(s.keyboard.current_focus(), focus);
+            s.switch_workspace(1);
+            assert_eq!(s.master_ratio(1), 5000);
+            s.switch_workspace(0);
+            assert_eq!(s.master_ratio(0), 6000);
+            s.dispatch(Dispatch::ResetMaster).unwrap();
+            s.pointer_location = (402.0, 100.0).into();
+            s.refresh_pointer(1);
+            s.pressed_buttons.insert(0x110);
+            assert!(s.try_start_split_drag(0x110, ButtonState::Pressed, 1));
+            assert!(s.pointer.current_focus().is_none());
+            s.pointer_location = (642.0, 100.0).into();
+            s.refresh_pointer(2);
+            assert_eq!(s.master_ratio(0), 8000);
+            s.pointer_location = (2000.0, 100.0).into();
+            s.refresh_pointer(3);
+            assert_eq!(s.master_ratio(0), 9000);
+            s.pointer.clone().button(
+                s,
+                &smithay::input::pointer::ButtonEvent {
+                    serial: SERIAL_COUNTER.next_serial(),
+                    time: 4,
+                    button: 0x110,
+                    state: ButtonState::Released,
+                },
+            );
+            s.pressed_buttons.remove(&0x110);
+            assert!(!s.split_drag_active && !s.pointer.is_grabbed());
+            assert_eq!(s.keyboard.current_focus(), focus);
+            // Output changes cancel, preserving the already chosen proportion.
+            s.pointer_location = (722.0, 100.0).into();
+            s.refresh_pointer(5);
+            s.pressed_buttons.insert(0x110);
+            assert!(s.try_start_split_drag(0x110, ButtonState::Pressed, 5));
+            s.output_size = (1000, 600).into();
+            s.relayout_active_workspace();
+            assert!(!s.split_drag_active);
+            assert_eq!(s.master_ratio(0), 9000);
+            s.release_pointer_buttons();
+            s.output_size = (800, 600).into();
+            s.relayout_active_workspace();
+            s.dispatch(Dispatch::ResetMaster).unwrap();
+            // A workspace transition also releases the grab and held button.
+            s.pointer_location = (402.0, 100.0).into();
+            s.refresh_pointer(6);
+            s.pressed_buttons.insert(0x110);
+            assert!(s.try_start_split_drag(0x110, ButtonState::Pressed, 6));
+            s.switch_workspace(1);
+            assert!(!s.split_drag_active && s.pressed_buttons.is_empty());
+            s.switch_workspace(0);
+            let window = s.workspaces[0].windows[0].window.clone();
+            s.set_window_maximized(&window, true);
+            assert!(s.split_context().is_none());
+            s.dispatch(Dispatch::ResizeMaster(10)).unwrap();
+            assert_eq!(s.master_ratio(0), 5000);
+            s.set_window_maximized(&window, false);
+            // Defaults reload without overwriting a workspace's manual choice.
+            let path = knave_config::ConfigDocument::default_path().unwrap();
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(
+                &path,
+                "schema_version = 1\n[compositor]\nmaster_percent = 60\n",
+            )
+            .unwrap();
+            s.dispatch(Dispatch::ReloadConfig).unwrap();
+            assert_eq!(s.master_ratio(0), 6000);
+            s.dispatch(Dispatch::ResizeMaster(5)).unwrap();
+            std::fs::write(
+                &path,
+                "schema_version = 1\n[compositor]\nmaster_percent = 70\n",
+            )
+            .unwrap();
+            s.dispatch(Dispatch::ReloadConfig).unwrap();
+            assert_eq!(s.master_ratio(0), 6500);
+            s.dispatch(Dispatch::ResetMaster).unwrap();
+            assert_eq!(s.master_ratio(0), 7000);
+            std::fs::remove_file(path).unwrap();
+            s.dispatch(Dispatch::ReloadConfig).unwrap();
+            assert_eq!(s.master_ratio(0), 5000);
+            // Repeated adjustment must not accumulate beyond the bounds.
+            for _ in 0..250 {
+                s.dispatch(Dispatch::ResizeMaster(5)).unwrap();
+            }
+            assert_eq!(s.master_ratio(0), 9000);
+            s.dispatch(Dispatch::ResetMaster).unwrap();
+        });
+        settle(&mut queue, &mut client);
+        assert_eq!(client.configures[&1].width, 400);
+        assert_eq!(
+            client.pointer_buttons, 0,
+            "divider presses must not reach clients"
+        );
         let (dialog, _dx, dt) = create(3, "dialog");
         dt.set_parent(Some(&at));
         dialog.commit();

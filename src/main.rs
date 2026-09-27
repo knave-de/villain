@@ -17,6 +17,7 @@ mod preview;
 mod render;
 mod session;
 mod shutdown;
+mod split_grab;
 mod state;
 mod tty;
 mod window_grab;
