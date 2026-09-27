@@ -17,8 +17,9 @@ use crate::{state::Villain, workspaces::WorkspacePreviewScene};
 
 const MIN_WIDTH: u32 = 64;
 const MIN_HEIGHT: u32 = 36;
-const MAX_WIDTH: u32 = 1280;
-const MAX_HEIGHT: u32 = 720;
+const MAX_WIDTH: u32 = 16384;
+const MAX_HEIGHT: u32 = 16384;
+const MAX_PIXELS: u64 = 36 * 1024 * 1024;
 
 pub fn capture(
     state: &mut Villain,
@@ -26,9 +27,12 @@ pub fn capture(
     width: u32,
     height: u32,
 ) -> Result<Vec<u8>, String> {
-    if !(MIN_WIDTH..=MAX_WIDTH).contains(&width) || !(MIN_HEIGHT..=MAX_HEIGHT).contains(&height) {
+    if !(MIN_WIDTH..=MAX_WIDTH).contains(&width)
+        || !(MIN_HEIGHT..=MAX_HEIGHT).contains(&height)
+        || u64::from(width) * u64::from(height) > MAX_PIXELS
+    {
         return Err(format!(
-            "preview dimensions must be within {MIN_WIDTH}x{MIN_HEIGHT} and {MAX_WIDTH}x{MAX_HEIGHT}"
+            "preview dimensions must be within {MIN_WIDTH}x{MIN_HEIGHT} and {MAX_WIDTH}x{MAX_HEIGHT}, with at most {MAX_PIXELS} pixels"
         ));
     }
     let scene = workspace
@@ -86,7 +90,9 @@ fn render(
     let mut framebuffer = renderer
         .bind(&mut target)
         .map_err(|error| format!("could not bind preview target: {error}"))?;
-    let mut damage = OutputDamageTracker::new(physical_size, 1.0, Transform::Normal);
+    // Surface sizes are resolved using the damage tracker scale, independently
+    // of the physical positions computed above. Both must use thumbnail scale.
+    let mut damage = OutputDamageTracker::new(physical_size, scale, Transform::Normal);
     let result = damage
         .render_output(
             renderer,
