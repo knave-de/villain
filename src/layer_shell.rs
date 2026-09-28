@@ -46,6 +46,13 @@ impl WlrLayerShellHandler for Villain {
 
     fn layer_destroyed(&mut self, surface: wlr_layer::LayerSurface) {
         self.dismiss_layer_popups(surface.wl_surface());
+        if self.shell_surfaces.iter().any(|entry| {
+            entry.layer.layer_surface() == &surface
+                && entry.layer.namespace() == "knave-shell-overview"
+        }) {
+            self.overview_panes.clear();
+            self.request_repaint();
+        }
         self.shell_surfaces.retain(|entry| {
             if entry.layer.layer_surface() == &surface {
                 layer_map_for_output(&entry.output).unmap_layer(&entry.layer);
@@ -98,6 +105,9 @@ impl Villain {
             }
         }
         entry.mapped = mapped;
+        if !mapped && entry.layer.namespace() == "knave-shell-overview" {
+            self.overview_panes.clear();
+        }
         if was_mapped && !mapped {
             self.dismiss_layer_popups(surface);
         }

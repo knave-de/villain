@@ -24,7 +24,8 @@ use std::{
 use base64::Engine;
 use knave_desktop_api::{
     API_VERSION, DesktopError, DesktopErrorCode, DesktopQuery, DesktopRequest, DesktopResponse,
-    DesktopSnapshot, ProtocolVersion, WorkspaceId, WorkspacePreview, socket_path_for_display,
+    DesktopSnapshot, OverviewPane, ProtocolVersion, WorkspaceId, WorkspacePreview,
+    socket_path_for_display,
 };
 use smithay::reexports::calloop::{
     EventLoop, Interest, LoopHandle, Mode, PostAction, RegistrationToken, channel, generic::Generic,
@@ -375,11 +376,61 @@ impl Villain {
         self.ipc_server.subscriptions.publish(snapshot);
     }
 
+    fn set_overview_panes(&mut self, panes: Vec<OverviewPane>) -> DesktopResponse {
+        if panes.len() > 3 {
+            return invalid_request("at most three overview panes are allowed".into());
+        }
+        if !panes.is_empty()
+            && !self
+                .shell_surfaces
+                .iter()
+                .any(|entry| entry.layer.namespace() == "knave-shell-overview")
+        {
+            return invalid_request("overview shell surface is not present".into());
+        }
+        let output = self.output_size;
+        if panes.iter().enumerate().any(|(index, pane)| {
+            panes[..index]
+                .iter()
+                .any(|other| other.workspace == pane.workspace)
+                || {
+                    let x = i64::from(pane.x);
+                    let y = i64::from(pane.y);
+                    let width = i64::from(pane.width);
+                    let height = i64::from(pane.height);
+                    let ow = i64::from(output.w);
+                    let oh = i64::from(output.h);
+                    pane.workspace.0 == 0
+                        || pane.workspace.0 as usize > self.workspaces.len()
+                        || width == 0
+                        || height == 0
+                        || width > ow
+                        || height > oh
+                        || x < -ow
+                        || y < -oh
+                        || x >= ow
+                        || y >= oh
+                        || x + width <= 0
+                        || y + height <= 0
+                }
+        }) {
+            return invalid_request(
+                "overview pane is outside the logical output or workspace range".into(),
+            );
+        }
+        if self.overview_panes != panes {
+            self.overview_panes = panes;
+            self.request_repaint();
+        }
+        DesktopResponse::Ok
+    }
+
     fn handle_ipc(&mut self, request: DesktopRequest) -> DesktopResponse {
         match request {
             DesktopRequest::Subscribe { .. } => {
                 invalid_request("Subscribe requires a dedicated transport".into())
             }
+            DesktopRequest::SetOverviewPanes { panes } => self.set_overview_panes(panes),
             DesktopRequest::Dispatch(command) => match self.dispatch(Dispatch::from(command)) {
                 Ok(()) => DesktopResponse::Ok,
                 Err(error) => dispatch_error(error),

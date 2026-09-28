@@ -75,7 +75,22 @@ impl CompositorHandler for Villain {
         let visible_window = self
             .window_for_surface(&root)
             .is_some_and(|window| self.space.element_location(&window).is_some());
-        if visible_window || self.layer_surface_visible(&root) || self.cursor.uses_surface(&root) {
+        let overview_window = !visible_window
+            && self.window_for_surface(&root).is_some_and(|window| {
+                self.workspace_for_window(&window).is_some_and(|index| {
+                    self.overview_panes.iter().any(|pane| {
+                        pane.workspace.0 as usize == index + 1
+                            && self.workspace_preview_scene(index).is_some_and(|scene| {
+                                scene.windows.iter().any(|(visible, _)| visible == &window)
+                            })
+                    })
+                })
+            });
+        if visible_window
+            || overview_window
+            || self.layer_surface_visible(&root)
+            || self.cursor.uses_surface(&root)
+        {
             self.request_repaint();
         }
 

@@ -84,6 +84,7 @@ pub fn init_winit(
         .insert_source(winit_source, move |event, _, state| match event {
             WinitEvent::Resized { size, .. } => {
                 state.output_size = size.to_logical(1);
+                state.overview_panes.clear();
                 state.winit.as_ref().unwrap().output.change_current_state(
                     Some(Mode {
                         size,
@@ -205,14 +206,15 @@ fn render_frame(state: &mut Villain) {
         let cursor_elements = state
             .cursor
             .render_elements(renderer, state.pointer_location, now);
-        let result = render_output::<_, crate::cursor::CursorRenderElement, _, _>(
+        let elements = crate::overview_render::elements(state, renderer, cursor_elements);
+        let result = render_output::<_, crate::overview_render::OverviewRenderElement, _, _>(
             &winit.output,
             renderer,
             &mut framebuffer,
             1.0,
             age,
             [&state.space],
-            &cursor_elements,
+            &elements,
             &mut winit.damage,
             [0.08, 0.05, 0.12, 1.0],
         )?;

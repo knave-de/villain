@@ -264,6 +264,7 @@ impl Tty {
             state
                 .cursor
                 .render_elements(&mut self.renderer, state.pointer_location, now);
+        let elements = crate::overview_render::elements(state, &mut self.renderer, cursor_elements);
         let result = render_output(
             &self.output,
             &mut self.renderer,
@@ -271,7 +272,7 @@ impl Tty {
             1.0,
             usize::from(age),
             [&state.space],
-            &cursor_elements,
+            &elements,
             &mut self.damage,
             [0.08, 0.05, 0.12, 1.0],
         )?;

@@ -60,6 +60,16 @@ impl Villain {
                     for window in state.space.elements() {
                         window.send_frame(&output, now, None, |_, _| Some(output.clone()));
                     }
+                    for pane in &state.overview_panes {
+                        let index = pane.workspace.0 as usize - 1;
+                        if index != state.active_workspace
+                            && let Some(scene) = state.workspace_preview_scene(index)
+                        {
+                            for (window, _) in scene.windows {
+                                window.send_frame(&output, now, None, |_, _| Some(output.clone()));
+                            }
+                        }
+                    }
                     for entry in &state.shell_surfaces {
                         if entry.mapped && entry.output == output {
                             entry
