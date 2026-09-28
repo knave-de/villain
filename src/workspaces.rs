@@ -380,6 +380,7 @@ impl Villain {
         changed |= entry.floating != geometry;
         entry.floating = geometry;
         if changed {
+            self.desktop_state_dirty = true;
             if index == self.active_workspace || moved_from == Some(self.active_workspace) {
                 self.relayout_active_workspace();
             }
@@ -486,6 +487,7 @@ impl Villain {
     }
 
     pub fn set_window_fullscreen(&mut self, window: &Window, fullscreen: bool) {
+        self.desktop_state_dirty = true;
         let Some(index) = self.workspace_for_window(window) else {
             return;
         };
@@ -519,6 +521,7 @@ impl Villain {
 
     /// Maximization overlays the layout; tiled order and floating geometry stay intact.
     pub fn set_window_maximized(&mut self, window: &Window, maximized: bool) {
+        self.desktop_state_dirty = true;
         let Some(index) = self.workspace_for_window(window) else {
             return;
         };
@@ -723,6 +726,7 @@ impl Villain {
     }
 
     fn add_workspace_window(&mut self, index: usize, window: Window) {
+        self.desktop_state_dirty = true;
         let id = WindowId(self.next_window_id);
         self.next_window_id += 1;
         self.workspaces[index].windows.push(WorkspaceWindow {
@@ -830,6 +834,7 @@ impl Villain {
     }
 
     pub fn relayout_active_workspace(&mut self) {
+        self.desktop_state_dirty = true;
         self.map_active_workspace();
         // An implicit button grab must not survive minimizing its window.
         if self
@@ -908,6 +913,7 @@ impl Villain {
     }
 
     pub(crate) fn apply_window_action(&mut self, window: &Window, action: WindowAction) {
+        self.desktop_state_dirty = true;
         match action {
             WindowAction::Close => {
                 if let Some(surface) = window.toplevel() {
@@ -1013,6 +1019,7 @@ impl Villain {
     }
 
     pub fn restore_window(&mut self, id: WindowId) -> bool {
+        self.desktop_state_dirty = true;
         for (workspace_index, workspace) in self.workspaces.iter_mut().enumerate() {
             let Some(entry) = workspace.windows.iter_mut().find(|entry| entry.id == id) else {
                 continue;
@@ -1500,12 +1507,14 @@ impl Villain {
     }
 
     pub fn remove_window(&mut self, surface: &ToplevelSurface) {
+        self.desktop_state_dirty = true;
         if let Some(window) = self.window_for_toplevel(surface) {
             self.remove_managed_window(&window);
         }
     }
 
     pub fn remove_x11_window(&mut self, surface: &X11Surface) {
+        self.desktop_state_dirty = true;
         if let Some(window) = self.window_for_x11_surface(surface) {
             if surface.is_override_redirect() {
                 if self.pointer.current_focus() == Self::window_surface(&window) {

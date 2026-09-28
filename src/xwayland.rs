@@ -274,6 +274,7 @@ impl XwmHandler for Villain {
     }
 
     fn property_notify(&mut self, _xwm: XwmId, surface: X11Surface, property: WmWindowProperty) {
+        self.desktop_state_dirty = true;
         if matches!(
             property,
             WmWindowProperty::NormalHints

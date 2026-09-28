@@ -72,6 +72,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         state.reap_children();
         state.space.refresh();
         state.popups.cleanup();
+        state.publish_desktop_state();
         let _ = state.display_handle.flush_clients();
         state.render_if_needed();
     })?;

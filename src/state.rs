@@ -53,7 +53,8 @@ pub struct Villain {
     pub socket_name: OsString,
     pub start_time: Instant,
     pub loop_signal: LoopSignal,
-    _ipc_server: crate::ipc::IpcServer,
+    pub(crate) ipc_server: crate::ipc::IpcServer,
+    pub(crate) desktop_state_dirty: bool,
     pub config: RuntimeConfig,
 
     /// The desktop plane: windows are mapped here and later rendered here.
@@ -146,7 +147,8 @@ impl Villain {
             socket_name,
             start_time: Instant::now(),
             loop_signal: event_loop.get_signal(),
-            _ipc_server: ipc_server,
+            ipc_server,
+            desktop_state_dirty: true,
             config,
             space: Space::default(),
             compositor_state: CompositorState::new::<Self>(&display_handle),
@@ -263,6 +265,7 @@ impl SeatHandler for Villain {
         seat: &smithay::input::Seat<Self>,
         focused: Option<&Self::KeyboardFocus>,
     ) {
+        self.desktop_state_dirty = true;
         let client = focused.and_then(|focus| {
             smithay::wayland::seat::WaylandFocus::wl_surface(focus)
                 .and_then(|surface| surface.client())
