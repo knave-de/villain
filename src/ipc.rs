@@ -12,7 +12,11 @@ use std::{
     os::unix::{fs::FileTypeExt, net::UnixListener},
     path::{Path, PathBuf},
     rc::Rc,
-    sync::{Arc, mpsc},
+    sync::{
+        Arc,
+        atomic::{AtomicU8, Ordering},
+        mpsc,
+    },
     thread,
     time::Duration,
 };
@@ -40,6 +44,7 @@ struct Envelope {
     request: DesktopRequest,
     response: mpsc::Sender<Reply>,
     subscriber: Option<Arc<Subscriber>>,
+    state: Arc<AtomicU8>,
 }
 
 enum Reply {
@@ -61,6 +66,9 @@ pub struct IpcServer {
 }
 const MAX_CLIENTS: usize = 16;
 const IO_TIMEOUT: Duration = Duration::from_secs(2);
+const QUEUED: u8 = 0;
+const EXECUTING: u8 = 1;
+const CANCELLED: u8 = 2;
 impl Drop for IpcServer {
     fn drop(&mut self) {
         self.handle.remove(self.listener);
@@ -116,6 +124,15 @@ pub fn init(
                 }
                 channel::Event::Closed => return,
             };
+            // Once execution starts, the worker waits for its result rather than
+            // reporting a timeout for a command that may already have taken effect.
+            if envelope
+                .state
+                .compare_exchange(QUEUED, EXECUTING, Ordering::AcqRel, Ordering::Acquire)
+                .is_err()
+            {
+                return;
+            }
             {
                 let reply = match envelope.request {
                     DesktopRequest::Subscribe { protocol } => {
@@ -171,8 +188,17 @@ pub fn init(
                 if clients.len() >= MAX_CLIENTS {
                     continue;
                 }
-                stream.set_write_timeout(Some(IO_TIMEOUT))?;
-                let control = stream.try_clone()?;
+                if let Err(error) = stream.set_write_timeout(Some(IO_TIMEOUT)) {
+                    tracing::warn!(%error, "could not configure desktop IPC client");
+                    continue;
+                }
+                let control = match stream.try_clone() {
+                    Ok(control) => control,
+                    Err(error) => {
+                        tracing::warn!(%error, "could not clone desktop IPC client");
+                        continue;
+                    }
+                };
                 let sender = sender.clone();
                 let id = next_client;
                 next_client = next_client.wrapping_add(1);
@@ -244,23 +270,42 @@ fn serve_connection(
             None
         };
         let (response, receive) = mpsc::channel();
+        let state = Arc::new(AtomicU8::new(QUEUED));
         if sender
             .send(IpcMessage::Request(Envelope {
                 request,
                 response,
                 subscriber: subscription.as_ref().map(|(s, _)| s.clone()),
+                state: Arc::clone(&state),
             }))
             .is_err()
         {
             return;
         }
-        match receive.recv_timeout(IO_TIMEOUT) {
-            Ok(Reply::Response(response)) => {
+        let reply = match receive.recv_timeout(IO_TIMEOUT) {
+            Ok(reply) => reply,
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                if state
+                    .compare_exchange(QUEUED, CANCELLED, Ordering::AcqRel, Ordering::Acquire)
+                    .is_ok()
+                {
+                    return;
+                }
+                // A command already executing must produce its actual result.
+                match receive.recv() {
+                    Ok(reply) => reply,
+                    Err(_) => return,
+                }
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => return,
+        };
+        match reply {
+            Reply::Response(response) => {
                 if write_response(&mut stream, &response).is_err() {
                     return;
                 }
             }
-            Ok(Reply::Subscribed(initial)) => {
+            Reply::Subscribed(initial) => {
                 if stream.write_all(&initial).is_err() {
                     return;
                 }
@@ -275,7 +320,6 @@ fn serve_connection(
                 }
                 return;
             }
-            Err(_) => return,
         }
     }
 }
