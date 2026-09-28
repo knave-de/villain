@@ -4,7 +4,7 @@ Villain owns the per-workspace master ratio, divider hit testing, pointer grab,
 keyboard actions and window geometry. Knave owns the additive schema-1
 `[compositor] master_percent` setting (integer 10..90, default 50). The Shell
 and desktop API 1.1 are unchanged. Individual stack dividers are outside this
-slice. Villain pins knave-config at `6757702837c4bdd6f272765fb770e5c8b1ff6d5e`.
+slice. Villain pins knave-config at `d051735bca26affc370467779dbb1f625cac6318`.
 
 The runtime ratio uses basis points for smooth dragging. An unset workspace
 override follows configuration; a manual drag or key adjustment preserves its
