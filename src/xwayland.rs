@@ -673,6 +673,24 @@ mod tests {
         pump_until(&mut event_loop, &mut state, |state| {
             state.window_for_x11_id(other).is_some()
         });
+        state
+            .dispatch(crate::dispatch::Dispatch::ResizeMaster(10))
+            .unwrap();
+        pump_until(&mut event_loop, &mut state, |_| {
+            conn.get_geometry(first).unwrap().reply().unwrap().width == 480
+                && conn.get_geometry(other).unwrap().reply().unwrap().width == 320
+        });
+        assert_eq!(
+            conn.get_geometry(first).unwrap().reply().unwrap().width,
+            480
+        );
+        assert_eq!(
+            conn.get_geometry(other).unwrap().reply().unwrap().width,
+            320
+        );
+        state
+            .dispatch(crate::dispatch::Dispatch::ResetMaster)
+            .unwrap();
         let dialog = create(false, Some(first));
         pump_until(&mut event_loop, &mut state, |state| {
             state

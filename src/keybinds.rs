@@ -49,6 +49,9 @@ impl KeybindRegistry {
             spec("MOD+RETURN", "exec", &["kitty"]),
             spec("MOD+Q", "close", &[]),
             spec("MOD+F", "toggle-maximize", &[]),
+            spec("MOD+CTRL+LEFT", "resize-master", &["-5"]),
+            spec("MOD+CTRL+RIGHT", "resize-master", &["5"]),
+            spec("MOD+CTRL+R", "reset-master", &[]),
             spec("MOD+M", "minimize", &[]),
             spec("MOD+SHIFT+M", "restore-minimized", &[]),
             spec("MOD+LEFT", "previous-workspace", &[]),
@@ -221,6 +224,18 @@ fn parse_keys(value: &str, modkey: Modkey) -> Result<KeyCombination, String> {
 
 fn parse_dispatch(spec: &BindSpec) -> Result<Dispatch, String> {
     match spec.dispatch.as_str() {
+        "resize-master" if spec.args.len() == 1 => {
+            let delta: i16 = spec.args[0]
+                .parse()
+                .map_err(|_| "resize-master requires an integer percentage change".to_string())?;
+            if delta == 0 || !(-80..=80).contains(&delta) {
+                return Err("resize-master change must be -80..-1 or 1..80".into());
+            }
+            Ok(Dispatch::ResizeMaster(delta))
+        }
+        "resize-master" => Err("resize-master requires exactly one argument".into()),
+        "reset-master" if spec.args.is_empty() => Ok(Dispatch::ResetMaster),
+        "reset-master" => Err("reset-master does not accept arguments".into()),
         "close" if spec.args.is_empty() => Ok(Dispatch::CloseFocused),
         "maximize" if spec.args.is_empty() => Ok(Dispatch::MaximizeFocused),
         "unmaximize" if spec.args.is_empty() => Ok(Dispatch::UnmaximizeFocused),
@@ -367,6 +382,37 @@ pub fn handle_keyboard_event<B: InputBackend>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resize_bindings_validate_delta_and_resolve_modkey() {
+        let registry = KeybindRegistry::defaults("Super").unwrap();
+        assert_eq!(
+            registry.find(&[Keysym::new(keysyms::KEY_Left)], true, false, false, true),
+            Some(Dispatch::ResizeMaster(-5))
+        );
+        assert_eq!(
+            registry.find(&[Keysym::new(keysyms::KEY_Right)], true, false, false, true),
+            Some(Dispatch::ResizeMaster(5))
+        );
+        assert_eq!(
+            parse_dispatch(&spec("MOD+R", "reset-master", &[])).unwrap(),
+            Dispatch::ResetMaster
+        );
+        assert_eq!(
+            parse_dispatch(&spec("MOD+H", "resize-master", &["-2"])).unwrap(),
+            Dispatch::ResizeMaster(-2)
+        );
+        for args in [
+            vec![],
+            vec!["0"],
+            vec!["81"],
+            vec!["-81"],
+            vec!["NaN"],
+            vec!["2", "3"],
+        ] {
+            assert!(parse_dispatch(&spec("MOD+H", "resize-master", &args)).is_err());
+        }
+    }
 
     #[test]
     fn modkey_changes_all_default_bindings() {

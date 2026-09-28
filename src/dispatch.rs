@@ -9,6 +9,8 @@ use crate::state::Villain;
 #[derive(Clone, Debug, PartialEq)]
 pub enum Dispatch {
     ReloadConfig,
+    ResizeMaster(i16),
+    ResetMaster,
     CloseFocused,
     MinimizeFocused,
     MaximizeFocused,
@@ -90,13 +92,24 @@ impl Villain {
                     .config
                     .reload()
                     .map_err(|error| DispatchError::Config(error.to_string()))?;
+                self.release_pointer_buttons();
                 self.config = config;
+                self.relayout_active_workspace();
+                self.request_repaint();
                 crate::session::prepare_environment(self);
                 if self.owns_session {
                     crate::session::activate(self, false);
                 }
                 self.apply_input_config();
                 tracing::info!("configuration reloaded");
+                Ok(())
+            }
+            Dispatch::ResizeMaster(delta) => {
+                self.resize_master(Some(delta));
+                Ok(())
+            }
+            Dispatch::ResetMaster => {
+                self.resize_master(None);
                 Ok(())
             }
             Dispatch::CloseFocused => self
