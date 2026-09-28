@@ -367,6 +367,10 @@ impl Villain {
         if !self.desktop_state_dirty && self.ipc_server.subscriptions.snapshot.is_some() {
             return;
         }
+        // Workspace changes outside the active desktop still change live overview panes.
+        if !self.overview_panes.is_empty() {
+            self.request_repaint();
+        }
         self.desktop_state_dirty = false;
         let snapshot = DesktopSnapshot {
             generation: 0,
@@ -384,9 +388,13 @@ impl Villain {
             && !self
                 .shell_surfaces
                 .iter()
-                .any(|entry| entry.layer.namespace() == "knave-shell-overview")
+                .any(|entry| entry.layer.namespace() == "knave-shell-overview" && entry.mapped)
         {
-            return invalid_request("overview shell surface is not present".into());
+            return DesktopResponse::Error(DesktopError {
+                code: DesktopErrorCode::Unavailable,
+                message: "overview shell surface is not mapped".into(),
+                retryable: true,
+            });
         }
         let output = self.output_size;
         if panes.iter().enumerate().any(|(index, pane)| {

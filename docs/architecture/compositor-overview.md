@@ -3,9 +3,9 @@
 Villain implements Knave desktop API 1.3 `set_overview_panes`. The shell sends
 up to three workspace IDs and rectangles in logical output coordinates. Villain
 rejects duplicate IDs, invalid workspaces, zero or oversized rectangles, and
-requests without an overview layer surface. Replacing the list requests a
-repaint. Unmapping or destroying `knave-shell-overview` clears the list; output
-resize invalidates its geometry. There is no persistent state.
+requests without a mapped overview layer surface with a retryable unavailable
+response. Replacing the list requests a repaint. Unmapping or destroying
+`knave-shell-overview` clears the list; output resize invalidates its geometry. There is no persistent state.
 
 Both nested Winit and direct TTY use the same render-element construction.
 Existing window surface textures are transformed to fit the output aspect
