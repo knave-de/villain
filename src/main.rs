@@ -13,6 +13,7 @@ mod handlers;
 mod ipc;
 mod keybinds;
 mod layer_shell;
+mod overview_render;
 mod preview;
 mod render;
 mod session;
