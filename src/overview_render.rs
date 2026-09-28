@@ -6,8 +6,8 @@ use smithay::{
             AsRenderElements,
             surface::WaylandSurfaceRenderElement,
             utils::{
-                ConstrainAlign, ConstrainScaleBehavior, CropRenderElement, RelocateRenderElement,
-                RescaleRenderElement, constrain_render_elements,
+                ConstrainAlign, ConstrainScaleBehavior, CropRenderElement, Relocate,
+                RelocateRenderElement, RescaleRenderElement, constrain_render_elements,
             },
         },
         gles::GlesRenderer,
@@ -17,8 +17,10 @@ use smithay::{
 
 use crate::{cursor::CursorRenderElement, state::Villain};
 
-type PaneElement = CropRenderElement<
-    RelocateRenderElement<RescaleRenderElement<WaylandSurfaceRenderElement<GlesRenderer>>>,
+type PaneElement = RelocateRenderElement<
+    CropRenderElement<
+        RelocateRenderElement<RescaleRenderElement<WaylandSurfaceRenderElement<GlesRenderer>>>,
+    >,
 >;
 
 smithay::backend::renderer::element::render_elements! {
@@ -48,7 +50,9 @@ pub fn elements(
         let Ok(height) = i32::try_from(pane.height) else {
             continue;
         };
-        let target = Rectangle::new((pane.x, pane.y).into(), (width, height).into());
+        // Smithay constrains in the source coordinate space; the crop must be
+        // pane-local, then the completed element moves to its output position.
+        let crop = Rectangle::from_size((width, height).into());
         let windows: Vec<_> = scene
             .windows
             .into_iter()
@@ -67,12 +71,15 @@ pub fn elements(
             constrain_render_elements(
                 windows,
                 (0, 0),
-                target,
+                crop,
                 reference,
                 ConstrainScaleBehavior::Fit,
                 ConstrainAlign::CENTER,
                 Scale::from(1.0),
             )
+            .map(|element| {
+                RelocateRenderElement::from_element(element, (pane.x, pane.y), Relocate::Relative)
+            })
             .map(OverviewRenderElement::Pane),
         );
     }
