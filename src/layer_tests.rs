@@ -9,7 +9,7 @@ use std::{
 use wayland_client::{
     Connection, Dispatch, QueueHandle, delegate_noop,
     globals::{GlobalListContents, registry_queue_init},
-    protocol::{wl_buffer, wl_compositor, wl_registry, wl_shm, wl_shm_pool, wl_surface},
+    protocol::{wl_buffer, wl_compositor, wl_region, wl_registry, wl_shm, wl_shm_pool, wl_surface},
 };
 use wayland_protocols_wlr::layer_shell::v1::client::{
     zwlr_layer_shell_v1 as shell, zwlr_layer_surface_v1 as layer,
@@ -101,6 +101,7 @@ delegate_noop!(Client: ignore xdg_positioner::XdgPositioner);
 delegate_noop!(Client: ignore wayland_client::protocol::wl_seat::WlSeat);
 delegate_noop!(Client: ignore wl_compositor::WlCompositor);
 delegate_noop!(Client: ignore wl_surface::WlSurface);
+delegate_noop!(Client: ignore wl_region::WlRegion);
 delegate_noop!(Client: ignore wl_shm::WlShm);
 delegate_noop!(Client: ignore wl_shm_pool::WlShmPool);
 delegate_noop!(Client: ignore wl_buffer::WlBuffer);
@@ -362,6 +363,56 @@ fn layer_lifecycle_focus_and_workspace_independence() {
             assert!(s.shell_surfaces.is_empty());
             assert_eq!(s.usable_area().size.h, 600);
         });
+
+        inspect(&sender, |s| {
+            s.pointer_location = (400.0, 300.0).into();
+            s.refresh_pointer(0);
+            s.pressed_buttons.insert(272);
+            s.pointer.clone().button(
+                s,
+                &smithay::input::pointer::ButtonEvent {
+                    serial: smithay::utils::Serial::from(901),
+                    time: 0,
+                    button: 272,
+                    state: smithay::backend::input::ButtonState::Pressed,
+                },
+            );
+        });
+        let overview_surface = compositor.create_surface(&qh, ());
+        let overview = shell.get_layer_surface(
+            &overview_surface,
+            None,
+            shell::Layer::Overlay,
+            "knave-shell-overview".into(),
+            &qh,
+            (),
+        );
+        overview.set_anchor(
+            layer::Anchor::Top | layer::Anchor::Bottom | layer::Anchor::Left | layer::Anchor::Right,
+        );
+        overview.set_size(0, 0);
+        overview.set_exclusive_zone(-1);
+        overview.set_keyboard_interactivity(layer::KeyboardInteractivity::Exclusive);
+        overview_surface.commit();
+        settle(&mut queue, &mut client);
+        let empty_region = compositor.create_region(&qh, ());
+        overview_surface.set_input_region(Some(&empty_region));
+        let overview_buffer =
+            pool.create_buffer(0, 800, 600, 800 * 4, wl_shm::Format::Argb8888, &qh, ());
+        overview_surface.attach(Some(&overview_buffer), 0, 0);
+        overview_surface.commit();
+        settle(&mut queue, &mut client);
+        inspect(&sender, |s| {
+            assert!(s.pressed_buttons.is_empty());
+            assert!(!s.pointer.is_grabbed());
+            assert_eq!(
+                s.pointer.current_focus().as_ref(),
+                Some(s.shell_surfaces[0].layer.wl_surface())
+            );
+        });
+        overview.destroy();
+        overview_surface.destroy();
+        settle(&mut queue, &mut client);
     });
     let deadline = Instant::now() + Duration::from_secs(20);
     while !thread.is_finished() {

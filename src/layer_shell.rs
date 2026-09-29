@@ -192,8 +192,14 @@ impl Villain {
             }
         }
         entry.mapped = mapped;
+        let overview_became_mapped =
+            mapped && !was_mapped && entry.layer.namespace() == "knave-shell-overview";
         if !mapped && entry.layer.namespace() == "knave-shell-overview" {
             self.overview_panes.clear();
+        }
+        if overview_became_mapped {
+            // A modal overview must take pointer input even if an app held a grab.
+            self.release_pointer_buttons();
         }
         if was_mapped && !mapped {
             self.dismiss_layer_popups(surface);
@@ -277,6 +283,31 @@ impl Villain {
         &self,
         upper: bool,
     ) -> Option<(WlSurface, Point<f64, Logical>, Option<KeyboardFocus>)> {
+        if upper {
+            for entry in
+                self.shell_surfaces.iter().rev().filter(|entry| {
+                    entry.mapped && entry.layer.namespace() == "knave-shell-overview"
+                })
+            {
+                let map = layer_map_for_output(&entry.output);
+                let Some(geometry) = map.layer_geometry(&entry.layer) else {
+                    continue;
+                };
+                if geometry.to_f64().contains(self.pointer_location) {
+                    let root = entry.layer.wl_surface().clone();
+                    let origin = geometry.loc.to_f64();
+                    let (surface, offset) = entry
+                        .layer
+                        .surface_under(self.pointer_location - origin, WindowSurfaceType::ALL)
+                        .unwrap_or_else(|| (root.clone(), (0, 0).into()));
+                    return Some((
+                        surface,
+                        origin + offset.to_f64(),
+                        Some(KeyboardFocus::Wayland(root)),
+                    ));
+                }
+            }
+        }
         let kinds = if upper {
             [Layer::Overlay, Layer::Top]
         } else {
