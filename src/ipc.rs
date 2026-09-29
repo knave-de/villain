@@ -348,6 +348,7 @@ fn dispatch_error(error: DispatchError) -> DesktopResponse {
         DispatchError::UnknownWindow(_) | DispatchError::InvalidWorkspace(_) => {
             DesktopErrorCode::NotFound
         }
+        DispatchError::InvalidOverviewPoint => DesktopErrorCode::InvalidRequest,
         DispatchError::NoFocusedWindow
         | DispatchError::NoMinimizedWindow
         | DispatchError::MinimizedWindow(_) => DesktopErrorCode::Unavailable,

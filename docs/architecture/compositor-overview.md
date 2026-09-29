@@ -20,3 +20,13 @@ this compositor. Install Villain before a new shell; rollback the shell first.
 The selected hardware output currently has scale 1. Live nested and direct-TTY
 rendering, damage, input, frame pacing, CPU, memory, and wakeups need measurements
 on the target session before performance is considered verified.
+
+Desktop API 1.4 adds a point-selection command. Villain checks that the point is
+inside the active pane, maps it through the render fit transform, and selects the
+topmost visible window at that point. Empty space selects the pane's workspace.
+The default standalone Super binding toggles one overview surface; combinations
+continue to use their separate shortcuts. A pending launch is bounded to one
+child and a second Super release cancels it when its surface appears.
+The exact legacy `MOD` binding that executes `knave-shell overview` is
+interpreted as the toggle for existing user configuration; other custom exec
+bindings keep their configured commands.

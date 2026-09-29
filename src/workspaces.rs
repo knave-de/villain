@@ -638,6 +638,13 @@ impl Villain {
                     true
                 }
             });
+        if self
+            .overview_launch_pid
+            .is_some_and(|pid| !self.children.iter().any(|(_, child)| child.id() == pid))
+        {
+            self.overview_launch_pid = None;
+            self.overview_cancel_pending = false;
+        }
     }
     fn configure_window(
         window: &Window,
@@ -1152,7 +1159,7 @@ impl Villain {
         }
     }
 
-    fn window_id(&self, window: &Window) -> Option<WindowId> {
+    pub(crate) fn window_id(&self, window: &Window) -> Option<WindowId> {
         self.workspaces
             .iter()
             .flat_map(|workspace| workspace.windows.iter())

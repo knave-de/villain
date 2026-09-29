@@ -45,7 +45,7 @@ pub struct KeybindRegistry {
 impl KeybindRegistry {
     pub fn defaults(modkey: &str) -> Result<Self, String> {
         let mut specs = vec![
-            spec("MOD", "exec", &["knave-shell", "overview"]),
+            spec("MOD", "toggle-overview", &[]),
             spec("MOD+RETURN", "exec", &["kitty"]),
             spec("MOD+Q", "close", &[]),
             spec("MOD+F", "toggle-maximize", &[]),
@@ -245,6 +245,13 @@ fn parse_dispatch(spec: &BindSpec) -> Result<Dispatch, String> {
         "previous-workspace" if spec.args.is_empty() => Ok(Dispatch::PreviousWorkspace),
         "next-workspace" if spec.args.is_empty() => Ok(Dispatch::NextWorkspace),
         "quit" if spec.args.is_empty() => Ok(Dispatch::Quit),
+        "toggle-overview" if spec.args.is_empty() => Ok(Dispatch::ToggleOverview),
+        "exec"
+            if spec.keys.eq_ignore_ascii_case("MOD")
+                && spec.args == ["knave-shell", "overview"] =>
+        {
+            Ok(Dispatch::ToggleOverview)
+        }
         "exec" if !spec.args.is_empty() => Ok(Dispatch::Spawn(spec.args.clone())),
         "workspace" if spec.args.len() == 1 => {
             let workspace = spec.args[0]
@@ -255,8 +262,8 @@ fn parse_dispatch(spec: &BindSpec) -> Result<Dispatch, String> {
             }
             Ok(Dispatch::FocusWorkspace(workspace))
         }
-        "maximize" | "unmaximize" | "toggle-maximize" | "close" | "minimize"
-        | "restore-minimized" | "previous-workspace" | "next-workspace" | "quit" => {
+        "maximize" | "unmaximize" | "toggle-maximize" | "toggle-overview" | "close"
+        | "minimize" | "restore-minimized" | "previous-workspace" | "next-workspace" | "quit" => {
             Err("dispatch does not accept arguments".into())
         }
         "exec" => Err("exec requires a program in args".into()),
@@ -442,10 +449,19 @@ mod tests {
                 false,
                 true,
             ),
-            Some(Dispatch::Spawn(vec![
-                "knave-shell".into(),
-                "overview".into()
-            ]))
+            Some(Dispatch::ToggleOverview)
+        );
+    }
+
+    #[test]
+    fn legacy_overview_exec_binding_toggles_without_changing_other_execs() {
+        assert_eq!(
+            parse_dispatch(&spec("MOD", "exec", &["knave-shell", "overview"])).unwrap(),
+            Dispatch::ToggleOverview
+        );
+        assert_eq!(
+            parse_dispatch(&spec("MOD", "exec", &["wofi"])).unwrap(),
+            Dispatch::Spawn(vec!["wofi".into()])
         );
     }
 

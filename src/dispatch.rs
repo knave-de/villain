@@ -2,7 +2,7 @@
 
 use std::{fmt, io};
 
-use knave_desktop_api::{DesktopCommand, WindowId};
+use knave_desktop_api::{DesktopCommand, WindowId, WorkspaceId};
 
 use crate::state::Villain;
 
@@ -22,6 +22,13 @@ pub enum Dispatch {
     NextWorkspace,
     FocusWindow(WindowId),
     RestoreWindow(WindowId),
+    RestoreAndFocusWindow(WindowId),
+    FocusOverviewPoint {
+        workspace: WorkspaceId,
+        x: i32,
+        y: i32,
+    },
+    ToggleOverview,
     Spawn(Vec<String>),
     Quit,
 }
@@ -41,6 +48,11 @@ impl From<DesktopCommand> for Dispatch {
             }
             DesktopCommand::FocusWindow { window } => Self::FocusWindow(window),
             DesktopCommand::RestoreWindow { window } => Self::RestoreWindow(window),
+            DesktopCommand::RestoreAndFocusWindow { window } => Self::RestoreAndFocusWindow(window),
+            DesktopCommand::FocusOverviewPoint { workspace, x, y } => {
+                Self::FocusOverviewPoint { workspace, x, y }
+            }
+            DesktopCommand::ToggleOverview => Self::ToggleOverview,
             DesktopCommand::Spawn { argv } => Self::Spawn(argv),
             DesktopCommand::Quit => Self::Quit,
         }
@@ -53,6 +65,7 @@ pub enum DispatchError {
     NoFocusedWindow,
     NoMinimizedWindow,
     InvalidWorkspace(usize),
+    InvalidOverviewPoint,
     UnknownWindow(WindowId),
     MinimizedWindow(WindowId),
     EmptyCommand,
@@ -67,6 +80,9 @@ impl fmt::Display for DispatchError {
             Self::NoMinimizedWindow => write!(formatter, "no minimized window to restore"),
             Self::InvalidWorkspace(workspace) => {
                 write!(formatter, "workspace {workspace} does not exist")
+            }
+            Self::InvalidOverviewPoint => {
+                write!(formatter, "point is outside the active overview pane")
             }
             Self::UnknownWindow(window) => write!(formatter, "window {} does not exist", window.0),
             Self::MinimizedWindow(window) => {
@@ -162,6 +178,32 @@ impl Villain {
                 .restore_window(window)
                 .then_some(())
                 .ok_or(DispatchError::UnknownWindow(window)),
+            Dispatch::RestoreAndFocusWindow(window) => {
+                if !self.restore_window(window) {
+                    return Err(DispatchError::UnknownWindow(window));
+                }
+                self.focus_window(window)
+                    .and_then(|focused| focused.then_some(()))
+                    .ok_or(DispatchError::MinimizedWindow(window))
+            }
+            Dispatch::FocusOverviewPoint { workspace, x, y } => {
+                let index = workspace.0 as usize;
+                if index == 0 || index > self.workspaces.len() {
+                    return Err(DispatchError::InvalidWorkspace(index));
+                }
+                let Some(window) = self.overview_window_at(workspace, x, y) else {
+                    return Err(DispatchError::InvalidOverviewPoint);
+                };
+                if let Some(window) = window {
+                    self.focus_window(window)
+                        .and_then(|focused| focused.then_some(()))
+                        .ok_or(DispatchError::UnknownWindow(window))
+                } else {
+                    self.switch_workspace(index - 1);
+                    Ok(())
+                }
+            }
+            Dispatch::ToggleOverview => self.toggle_overview().map_err(DispatchError::Spawn),
             Dispatch::Spawn(argv) => {
                 if argv.is_empty() {
                     Err(DispatchError::EmptyCommand)

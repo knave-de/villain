@@ -67,6 +67,8 @@ pub struct Villain {
     pub layer_shell_state: smithay::wayland::shell::wlr_layer::WlrLayerShellState,
     pub shell_surfaces: Vec<crate::layer_shell::ShellSurface>,
     pub overview_panes: Vec<knave_desktop_api::OverviewPane>,
+    pub overview_launch_pid: Option<u32>,
+    pub overview_cancel_pending: bool,
     pub popups: smithay::desktop::PopupManager,
     pub xwayland_shell_state: XWaylandShellState,
     pub xwm: Option<X11Wm>,
@@ -158,6 +160,8 @@ impl Villain {
             ),
             shell_surfaces: Vec::new(),
             overview_panes: Vec::new(),
+            overview_launch_pid: None,
+            overview_cancel_pending: false,
             popups: Default::default(),
             // Advertise only policy that Villain currently implements. Close
             // is a compositor-to-client event, not a WM capability.
