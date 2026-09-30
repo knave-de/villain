@@ -15,6 +15,7 @@ pub struct ShellSurface {
     pub layer: LayerSurface,
     pub output: Output,
     pub mapped: bool,
+    pub hide_pending: bool,
 }
 
 impl WlrLayerShellHandler for Villain {
@@ -41,6 +42,7 @@ impl WlrLayerShellHandler for Villain {
             layer: LayerSurface::new(surface, namespace),
             output,
             mapped: false,
+            hide_pending: false,
         });
     }
 
@@ -115,6 +117,12 @@ impl Villain {
         entry.mapped = mapped;
         if !mapped && entry.layer.namespace() == "knave-shell-overview" {
             self.overview_panes.clear();
+            // A late unmap can acknowledge an earlier hide after Super reopened it.
+            let expected_hide = std::mem::take(&mut entry.hide_pending);
+            if was_mapped && !expected_hide && self.overview_visible {
+                self.overview_visible = false;
+                self.desktop_state_dirty = true;
+            }
         }
         if was_mapped && !mapped {
             self.dismiss_layer_popups(surface);

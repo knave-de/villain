@@ -414,6 +414,50 @@ fn layer_lifecycle_focus_and_workspace_independence() {
             assert!(s.shell_surfaces[0].mapped);
             assert_eq!(s.usable_area().size.h, 560);
         });
+        let overview = compositor.create_surface(&qh, ());
+        let overview_layer = shell.get_layer_surface(
+            &overview,
+            None,
+            shell::Layer::Overlay,
+            "knave-shell-overview".into(),
+            &qh,
+            (),
+        );
+        for late_hide in [false, true] {
+            inspect(&sender, |s| {
+                s.dispatch(crate::dispatch::Dispatch::SetOverviewVisible(true))
+                    .unwrap();
+            });
+            overview_layer.set_size(800, 40);
+            overview.commit();
+            settle(&mut queue, &mut client);
+            inspect(&sender, |s| assert!(s.overview_visible));
+            overview.attach(Some(&buffer), 0, 0);
+            overview.commit();
+            settle(&mut queue, &mut client);
+            inspect(&sender, move |s| {
+                assert!(s.shell_surfaces[1].mapped);
+                if late_hide {
+                    s.dispatch(crate::dispatch::Dispatch::SetOverviewVisible(false))
+                        .unwrap();
+                    s.dispatch(crate::dispatch::Dispatch::SetOverviewVisible(true))
+                        .unwrap();
+                }
+            });
+            overview.attach(None, 0, 0);
+            overview.commit();
+            settle(&mut queue, &mut client);
+            inspect(&sender, move |s| {
+                assert!(!s.shell_surfaces[1].mapped);
+                assert_eq!(s.overview_visible, late_hide);
+                assert!(!s.shell_surfaces[1].hide_pending);
+                s.publish_desktop_state();
+            });
+        }
+        overview_layer.destroy();
+        overview.destroy();
+        settle(&mut queue, &mut client);
+        inspect(&sender, |s| assert!(!s.overview_visible));
         layer.destroy();
         surface.destroy();
         settle(&mut queue, &mut client);
