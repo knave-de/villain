@@ -1404,6 +1404,11 @@ impl Villain {
                         KeyboardFocus::for_window(window)
                     }
                 });
+        if keyboard_surface.is_none() && self.host_focused {
+            // Empty space must not deactivate a visible workspace window.
+            self.restore_active_workspace_focus();
+            return;
+        }
         let focused_window = keyboard_surface.as_ref().and_then(|focus| {
             self.workspaces
                 .iter()

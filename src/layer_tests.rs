@@ -255,7 +255,11 @@ fn layer_lifecycle_focus_and_workspace_independence() {
         assert_eq!(client.app_size, (800, 600));
         inspect(&sender, |s| {
             s.pointer_location = (10.0, 10.0).into();
-            s.refresh_pointer(0);
+            s.refresh_pointer_and_focus(0);
+            assert!(
+                s.window_info()[0].focused,
+                "panel clicks retain application focus"
+            );
             assert_eq!(
                 s.pointer.current_focus().as_ref(),
                 Some(s.shell_surfaces[0].layer.wl_surface())
@@ -275,7 +279,7 @@ fn layer_lifecycle_focus_and_workspace_independence() {
             let expected = s.exclusive_layer_focus();
             assert!(expected.is_some());
             s.pointer_location = (500.0, 500.0).into();
-            s.refresh_pointer(0);
+            s.refresh_pointer_and_focus(0);
             assert_eq!(s.keyboard.current_focus(), expected);
             s.switch_workspace(1);
             assert_eq!(s.keyboard.current_focus(), expected);
@@ -361,6 +365,10 @@ fn layer_lifecycle_focus_and_workspace_independence() {
         inspect(&sender, |s| {
             assert!(s.shell_surfaces.is_empty());
             assert_eq!(s.usable_area().size.h, 600);
+            s.switch_workspace(0);
+            s.pointer_location = (2000.0, 100.0).into();
+            s.refresh_pointer_and_focus(0);
+            assert!(s.window_info()[0].focused);
         });
     });
     let deadline = Instant::now() + Duration::from_secs(20);
