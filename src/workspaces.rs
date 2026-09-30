@@ -86,7 +86,6 @@ type Geometry = Rectangle<i32, smithay::utils::Logical>;
 type WindowPlacement = (Window, Geometry, bool, bool, bool, bool);
 
 pub(crate) struct WorkspacePreviewScene {
-    pub output_size: Size<i32, smithay::utils::Logical>,
     pub windows: Vec<(Window, Geometry)>,
 }
 
@@ -148,7 +147,11 @@ impl Villain {
     }
 
     pub(crate) fn split_context(&self) -> Option<SplitContext> {
-        let area = self.usable_area();
+        let area = if self.config.appearance.views.tiled.gaps {
+            crate::appearance::inset(self.usable_area(), self.config.appearance.gaps.outer)
+        } else {
+            self.usable_area()
+        };
         if area.size.w < 10 || area.size.h < 1 {
             return None;
         }
@@ -186,7 +189,11 @@ impl Villain {
         {
             return None;
         }
-        let area = self.usable_area();
+        let area = if self.config.appearance.views.tiled.gaps {
+            crate::appearance::inset(self.usable_area(), self.config.appearance.gaps.outer)
+        } else {
+            self.usable_area()
+        };
         let x = area.loc.x + master_width(area.size.w, self.master_ratio(self.active_workspace));
         if (self.pointer_location.x - f64::from(x)).abs() > 5.0
             || !area.to_f64().contains(self.pointer_location)
@@ -195,7 +202,9 @@ impl Villain {
         }
         let context = self.split_context()?;
         // Dialogs, popups and override-redirect windows keep their normal input.
-        let (window, origin) = self.space.element_under(self.pointer_location)?;
+        let Some((window, origin)) = self.space.element_under(self.pointer_location) else {
+            return Some(context);
+        };
         let entry = self.workspaces[self.active_workspace]
             .windows
             .iter()
@@ -399,7 +408,7 @@ impl Villain {
         })
     }
 
-    fn workspace_layout(&self, index: usize) -> Vec<WindowPlacement> {
+    pub(crate) fn workspace_layout(&self, index: usize) -> Vec<WindowPlacement> {
         let workspace = &self.workspaces[index];
         let fullscreen = workspace.fullscreen.filter(|id| {
             workspace.windows.iter().any(|entry| {
@@ -417,7 +426,12 @@ impl Villain {
             .iter()
             .filter(|entry| !entry.minimized && entry.floating.is_none())
             .count();
-        let area = self.usable_area();
+        let usable = self.usable_area();
+        let area = if self.config.appearance.views.tiled.gaps {
+            crate::appearance::inset(usable, self.config.appearance.gaps.outer)
+        } else {
+            usable
+        };
         let mut tiles = master_stack_layout(area.size, count, self.master_ratio(index)).into_iter();
         let mut result = Vec::new();
         for entry in &workspace.windows {
@@ -435,9 +449,25 @@ impl Villain {
             let rect = if is_fullscreen {
                 Rectangle::from_size(self.output_size)
             } else if is_maximized {
-                area
+                let view = self.config.appearance.views.maximized;
+                let rect = if view.gaps {
+                    crate::appearance::inset(usable, self.config.appearance.gaps.outer)
+                } else {
+                    usable
+                };
+                crate::appearance::client_rect(rect, &self.config.appearance, view, false)
             } else {
-                base
+                let view = if entry.floating.is_some() {
+                    self.config.appearance.views.floating
+                } else {
+                    self.config.appearance.views.tiled
+                };
+                if entry.floating.is_some() {
+                    // Floating rectangles are saved client geometry; effects never shrink them on every relayout.
+                    self.floating_placement(base)
+                } else {
+                    crate::appearance::client_rect(base, &self.config.appearance, view, true)
+                }
             };
             let visible = !entry.minimized
                 && !workspace.hidden_by_parent(entry)
@@ -469,7 +499,6 @@ impl Villain {
 
     pub(crate) fn workspace_preview_scene(&self, index: usize) -> Option<WorkspacePreviewScene> {
         (index < self.workspaces.len()).then(|| WorkspacePreviewScene {
-            output_size: self.output_size,
             windows: self
                 .workspace_layout(index)
                 .into_iter()
@@ -557,6 +586,23 @@ impl Villain {
         true
     }
 
+    fn floating_placement(&self, rect: Geometry) -> Geometry {
+        let appearance = &self.config.appearance;
+        let view = appearance.views.floating;
+        if (!view.gaps || appearance.gaps.outer == Default::default())
+            && (!view.borders || appearance.border.width == Default::default())
+        {
+            return rect;
+        }
+        let usable = self.usable_area();
+        let bounds = if view.gaps {
+            crate::appearance::inset(usable, appearance.gaps.outer)
+        } else {
+            usable
+        };
+        crate::appearance::constrain_floating(rect, bounds, appearance, view)
+    }
+
     pub(crate) fn floating_geometry(&self, window: &Window) -> Option<Geometry> {
         let workspace = &self.workspaces[self.workspace_for_window(window)?];
         workspace
@@ -569,6 +615,7 @@ impl Villain {
                     && workspace.maximized != Some(entry.id)
             })
             .and_then(|entry| entry.floating)
+            .map(|rect| self.floating_placement(rect))
     }
 
     /// Configure/map a floating window without re-entering pointer dispatch.
@@ -585,6 +632,7 @@ impl Villain {
             .find(|entry| entry.window == *window)
             .unwrap();
         entry.floating = Some(geometry);
+        let geometry = self.floating_placement(geometry);
         Self::configure_window(window, geometry.loc, geometry.size, false, false, false);
         if self.space.element_location(window).is_some() {
             self.space.map_element(window.clone(), geometry.loc, false);
@@ -1112,7 +1160,7 @@ impl Villain {
         self.window_info().into_iter().find(|window| window.focused)
     }
 
-    fn focused_window(&self) -> Option<Window> {
+    pub(crate) fn focused_window(&self) -> Option<Window> {
         let focused = self.keyboard.current_focus()?;
         self.workspaces[self.active_workspace]
             .windows
@@ -1351,6 +1399,100 @@ impl Villain {
             .cloned()
     }
 
+    fn input_shape(&self, window: &Window, rect: Geometry) -> (Geometry, [f32; 4], [f32; 4]) {
+        let view = self
+            .workspaces
+            .iter()
+            .find_map(|workspace| {
+                let entry = workspace
+                    .windows
+                    .iter()
+                    .find(|entry| entry.window == *window)?;
+                let appearance = &self.config.appearance;
+                Some(if workspace.fullscreen == Some(entry.id) {
+                    knave_config::appearance::ViewEffects::NONE
+                } else if workspace.maximized == Some(entry.id) {
+                    appearance.views.maximized
+                } else if entry.floating.is_some() {
+                    appearance.views.floating
+                } else {
+                    appearance.views.tiled
+                })
+            })
+            .unwrap_or(knave_config::appearance::ViewEffects::NONE);
+        let width = if view.borders {
+            self.config.appearance.border.width
+        } else {
+            Default::default()
+        };
+        let outer = Geometry::new(
+            (
+                rect.loc.x - i32::from(width.left),
+                rect.loc.y - i32::from(width.top),
+            )
+                .into(),
+            (
+                rect.size.w + i32::from(width.left) + i32::from(width.right),
+                rect.size.h + i32::from(width.top) + i32::from(width.bottom),
+            )
+                .into(),
+        );
+        let radii = crate::appearance::render::normalized_radii(
+            if view.radius {
+                self.config.appearance.border.radius
+            } else {
+                Default::default()
+            },
+            outer.size,
+        );
+        let inner = [
+            (radii[0] - f32::from(width.top.max(width.left))).max(0.0),
+            (radii[1] - f32::from(width.top.max(width.right))).max(0.0),
+            (radii[2] - f32::from(width.bottom.max(width.right))).max(0.0),
+            (radii[3] - f32::from(width.bottom.max(width.left))).max(0.0),
+        ];
+        (outer, radii, inner)
+    }
+
+    fn input_window_at_pointer(&self) -> Option<(Window, Point<i32, smithay::utils::Logical>)> {
+        for window in self.space.elements().rev() {
+            let location = self.space.element_location(window)?;
+            let origin = location - window.geometry().loc;
+            let Some((surface, _)) = window.surface_under(
+                self.pointer_location - origin.to_f64(),
+                WindowSurfaceType::ALL,
+            ) else {
+                continue;
+            };
+            let rect = Geometry::new(location, window.geometry().size);
+            let root =
+                std::iter::successors(Some(surface), smithay::wayland::compositor::get_parent)
+                    .last();
+            if root == Self::window_surface(window) {
+                let (_, _, radii) = self.input_shape(window, rect);
+                if !crate::appearance::rounded_contains(rect, radii, self.pointer_location) {
+                    continue;
+                }
+            }
+            return Some((window.clone(), origin));
+        }
+        None
+    }
+
+    fn border_window_at_pointer(&self) -> Option<(Window, Point<i32, smithay::utils::Logical>)> {
+        for window in self.space.elements().rev() {
+            let location = self.space.element_location(window)?;
+            let rect = Geometry::new(location, window.geometry().size);
+            let (outer, radii, _) = self.input_shape(window, rect);
+            if !rect.to_f64().contains(self.pointer_location)
+                && crate::appearance::rounded_contains(outer, radii, self.pointer_location)
+            {
+                return Some((window.clone(), location - window.geometry().loc));
+            }
+        }
+        None
+    }
+
     fn focus_layer_at_pointer(&mut self) -> bool {
         if let Some(focus) = self.exclusive_layer_focus() {
             self.focus_layer(focus);
@@ -1363,7 +1505,8 @@ impl Villain {
             return true;
         }
         if self.host_focused
-            && self.space.element_under(self.pointer_location).is_none()
+            && self.input_window_at_pointer().is_none()
+            && self.border_window_at_pointer().is_none()
             && let Some((_, _, Some(focus))) = self.layer_under_pointer(false)
         {
             self.focus_layer(focus);
@@ -1382,9 +1525,8 @@ impl Villain {
             return;
         }
         let hit = self
-            .space
-            .element_under(self.pointer_location)
-            .map(|(window, location)| (window.clone(), location));
+            .input_window_at_pointer()
+            .or_else(|| self.border_window_at_pointer());
         let keyboard_surface =
             hit.as_ref()
                 .filter(|_| self.host_focused)
@@ -1475,10 +1617,7 @@ impl Villain {
     }
 
     pub fn refresh_pointer_surface(&mut self, time: u32) {
-        let hit = self
-            .space
-            .element_under(self.pointer_location)
-            .map(|(window, location)| (window.clone(), location));
+        let hit = self.input_window_at_pointer();
         let focus = if self.host_focused {
             self.layer_under_pointer(true)
                 .map(|(surface, origin, _)| (surface, origin))
@@ -1543,6 +1682,7 @@ impl Villain {
     }
 
     fn remove_managed_window(&mut self, target: &Window) {
+        self.appearance_renderer.clear();
         for workspace in &mut self.workspaces {
             let removed: Vec<_> = workspace
                 .windows

@@ -9,7 +9,6 @@ use smithay::{
         renderer::{damage::OutputDamageTracker, gles::GlesRenderer},
         winit::{self, WinitEvent},
     },
-    desktop::space::render_output,
     input::pointer::{AxisFrame, ButtonEvent},
     output::{Mode, Output, PhysicalProperties, Subpixel},
     reexports::calloop::EventLoop,
@@ -206,16 +205,12 @@ fn render_frame(state: &mut Villain) {
         let cursor_elements = state
             .cursor
             .render_elements(renderer, state.pointer_location, now);
-        let elements = crate::overview_render::elements(state, renderer, cursor_elements);
-        let result = render_output::<_, crate::overview_render::OverviewRenderElement, _, _>(
-            &winit.output,
+        let elements = crate::overview_render::elements(state, renderer, cursor_elements)?;
+        let result = winit.damage.render_output(
             renderer,
             &mut framebuffer,
-            1.0,
             age,
-            [&state.space],
             &elements,
-            &mut winit.damage,
             [0.08, 0.05, 0.12, 1.0],
         )?;
         let damage = result.damage.cloned();

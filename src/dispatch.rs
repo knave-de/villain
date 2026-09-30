@@ -96,6 +96,7 @@ impl Villain {
                     .reload()
                     .map_err(|error| DispatchError::Config(error.to_string()))?;
                 self.release_pointer_buttons();
+                self.appearance_renderer.clear();
                 self.config = config;
                 self.relayout_active_workspace();
                 self.request_repaint();

@@ -6,14 +6,14 @@ use smithay::{
         renderer::{
             Bind, ExportMem, Offscreen,
             damage::OutputDamageTracker,
-            element::{AsRenderElements, surface::WaylandSurfaceRenderElement},
+            element::utils::{Relocate, RelocateRenderElement, RescaleRenderElement},
             gles::{GlesRenderbuffer, GlesRenderer},
         },
     },
-    utils::{Buffer, Physical, Point, Rectangle, Scale, Size, Transform},
+    utils::{Buffer, Physical, Point, Rectangle, Size, Transform},
 };
 
-use crate::{state::Villain, workspaces::WorkspacePreviewScene};
+use crate::{appearance::render::EffectElement, state::Villain};
 
 const MIN_WIDTH: u32 = 64;
 const MIN_HEIGHT: u32 = 36;
@@ -35,30 +35,44 @@ pub fn capture(
             "preview dimensions must be within {MIN_WIDTH}x{MIN_HEIGHT} and {MAX_WIDTH}x{MAX_HEIGHT}, with at most {MAX_PIXELS} pixels"
         ));
     }
-    let scene = workspace
+    let index = workspace
         .checked_sub(1)
-        .and_then(|index| state.workspace_preview_scene(index))
+        .filter(|index| *index < state.workspaces.len())
         .ok_or_else(|| format!("workspace {workspace} does not exist"))?;
-
-    if let Some(tty) = state.tty.as_mut() {
-        render(&mut tty.renderer, scene, width, height)
-    } else if let Some(winit) = state.winit.as_mut() {
-        render(winit.renderer(), scene, width, height)
+    let output_size = state.output_size;
+    let mut effects = std::mem::take(&mut state.appearance_renderer);
+    let result = if let Some(mut tty) = state.tty.take() {
+        let result = effects
+            .scene(state, &mut tty.renderer, index, false)
+            .map_err(|error| error.to_string())
+            .and_then(|elements| render(&mut tty.renderer, elements, output_size, width, height));
+        state.tty = Some(tty);
+        result
+    } else if let Some(mut winit) = state.winit.take() {
+        let result = effects
+            .scene(state, winit.renderer(), index, false)
+            .map_err(|error| error.to_string())
+            .and_then(|elements| render(winit.renderer(), elements, output_size, width, height));
+        state.winit = Some(winit);
+        result
     } else {
         Err("no renderer is available".into())
-    }
+    };
+    state.appearance_renderer = effects;
+    result
 }
 
 fn render(
     renderer: &mut GlesRenderer,
-    scene: WorkspacePreviewScene,
+    source_elements: Vec<EffectElement>,
+    output_size: Size<i32, smithay::utils::Logical>,
     width: u32,
     height: u32,
 ) -> Result<Vec<u8>, String> {
     let buffer_size: Size<i32, Buffer> = (width as i32, height as i32).into();
     let physical_size: Size<i32, Physical> = (width as i32, height as i32).into();
-    let source_width = scene.output_size.w.max(1) as f64;
-    let source_height = scene.output_size.h.max(1) as f64;
+    let source_width = output_size.w.max(1) as f64;
+    let source_height = output_size.h.max(1) as f64;
     let scale = (f64::from(width) / source_width).min(f64::from(height) / source_height);
     let content_width = (source_width * scale).round() as i32;
     let content_height = (source_height * scale).round() as i32;
@@ -68,18 +82,13 @@ fn render(
     )
         .into();
 
-    let elements: Vec<WaylandSurfaceRenderElement<GlesRenderer>> = scene
-        .windows
+    let elements: Vec<_> = source_elements
         .into_iter()
-        .rev()
-        .flat_map(|(window, geometry)| {
-            let location = offset + geometry.loc.to_physical_precise_round(Scale::from(scale));
-            AsRenderElements::<GlesRenderer>::render_elements(
-                &window,
-                renderer,
-                location,
-                Scale::from(scale),
-                1.0,
+        .map(|element| {
+            RelocateRenderElement::from_element(
+                RescaleRenderElement::from_element(element, (0, 0).into(), scale),
+                offset,
+                Relocate::Relative,
             )
         })
         .collect();
@@ -90,9 +99,7 @@ fn render(
     let mut framebuffer = renderer
         .bind(&mut target)
         .map_err(|error| format!("could not bind preview target: {error}"))?;
-    // Surface sizes are resolved using the damage tracker scale, independently
-    // of the physical positions computed above. Both must use thumbnail scale.
-    let mut damage = OutputDamageTracker::new(physical_size, scale, Transform::Normal);
+    let mut damage = OutputDamageTracker::new(physical_size, 1.0, Transform::Normal);
     let result = damage
         .render_output(
             renderer,
