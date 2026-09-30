@@ -45,7 +45,7 @@ pub struct KeybindRegistry {
 impl KeybindRegistry {
     pub fn defaults(modkey: &str) -> Result<Self, String> {
         let mut specs = vec![
-            spec("MOD", "exec", &["knave-shell", "overview"]),
+            spec("MOD", "toggle-overview", &[]),
             spec("MOD+RETURN", "exec", &["kitty"]),
             spec("MOD+Q", "close", &[]),
             spec("MOD+F", "toggle-maximize", &[]),
@@ -245,6 +245,10 @@ fn parse_dispatch(spec: &BindSpec) -> Result<Dispatch, String> {
         "previous-workspace" if spec.args.is_empty() => Ok(Dispatch::PreviousWorkspace),
         "next-workspace" if spec.args.is_empty() => Ok(Dispatch::NextWorkspace),
         "quit" if spec.args.is_empty() => Ok(Dispatch::Quit),
+        "toggle-overview" if spec.args.is_empty() => Ok(Dispatch::ToggleOverview),
+        // Keep user configurations that copied the former default from creating
+        // transient Overview processes now that Knave Session owns the service.
+        "exec" if spec.args == ["knave-shell", "overview"] => Ok(Dispatch::ToggleOverview),
         "exec" if !spec.args.is_empty() => Ok(Dispatch::Spawn(spec.args.clone())),
         "workspace" if spec.args.len() == 1 => {
             let workspace = spec.args[0]
@@ -256,9 +260,8 @@ fn parse_dispatch(spec: &BindSpec) -> Result<Dispatch, String> {
             Ok(Dispatch::FocusWorkspace(workspace))
         }
         "maximize" | "unmaximize" | "toggle-maximize" | "close" | "minimize"
-        | "restore-minimized" | "previous-workspace" | "next-workspace" | "quit" => {
-            Err("dispatch does not accept arguments".into())
-        }
+        | "restore-minimized" | "previous-workspace" | "next-workspace" | "quit"
+        | "toggle-overview" => Err("dispatch does not accept arguments".into()),
         "exec" => Err("exec requires a program in args".into()),
         "workspace" => Err("workspace requires exactly one argument".into()),
         dispatch => Err(format!("unknown dispatch {dispatch:?}")),
@@ -432,7 +435,7 @@ mod tests {
     }
 
     #[test]
-    fn default_modifier_release_opens_knave_overview() {
+    fn default_modifier_release_toggles_session_overview() {
         let registry = KeybindRegistry::defaults("Super").unwrap();
         assert_eq!(
             registry.find_modifier_only(
@@ -442,10 +445,11 @@ mod tests {
                 false,
                 true,
             ),
-            Some(Dispatch::Spawn(vec![
-                "knave-shell".into(),
-                "overview".into()
-            ]))
+            Some(Dispatch::ToggleOverview)
+        );
+        assert_eq!(
+            parse_dispatch(&spec("MOD", "exec", &["knave-shell", "overview"])).unwrap(),
+            Dispatch::ToggleOverview
         );
     }
 

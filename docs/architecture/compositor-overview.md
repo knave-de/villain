@@ -1,7 +1,13 @@
 # Compositor-rendered overview panes
 
-Villain implements Knave desktop API 1.3 `set_overview_panes`. The shell sends
-up to three workspace IDs and rectangles in logical output coordinates. Villain
+Villain implements Knave desktop API 1.4 overview visibility and API 1.3
+`set_overview_panes`. Knave Session starts one hidden Overview shell process.
+The default Super binding toggles the session-local `overview_visible` state;
+Escape and acknowledged shell actions set it false. The shell maps or unmaps
+its layer surface from the subscribed snapshot. Destroying the Overview surface
+resets visibility, so a supervised restart begins hidden. Visibility is not
+persistent. The shell sends up to three workspace IDs and rectangles in logical
+output coordinates. Villain
 rejects duplicate IDs, invalid workspaces, zero or oversized rectangles, and
 requests without a mapped overview layer surface with a retryable unavailable
 response. Replacing the list requests a repaint. Unmapping or destroying

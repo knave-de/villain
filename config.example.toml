@@ -10,8 +10,7 @@ natural_scroll = true
 # If any [[bind]] entries are present, they replace the complete default set.
 [[bind]]
 keys = "MOD"
-dispatch = "exec"
-args = ["knave-shell", "overview"]
+dispatch = "toggle-overview"
 
 [[bind]]
 keys = "MOD+RETURN"

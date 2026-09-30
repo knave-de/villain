@@ -24,6 +24,8 @@ pub enum Dispatch {
     RestoreWindow(WindowId),
     Spawn(Vec<String>),
     Quit,
+    ToggleOverview,
+    SetOverviewVisible(bool),
 }
 
 impl From<DesktopCommand> for Dispatch {
@@ -43,6 +45,7 @@ impl From<DesktopCommand> for Dispatch {
             DesktopCommand::RestoreWindow { window } => Self::RestoreWindow(window),
             DesktopCommand::Spawn { argv } => Self::Spawn(argv),
             DesktopCommand::Quit => Self::Quit,
+            DesktopCommand::SetOverviewVisible { visible } => Self::SetOverviewVisible(visible),
         }
     }
 }
@@ -171,6 +174,20 @@ impl Villain {
             }
             Dispatch::Quit => {
                 self.loop_signal.stop();
+                Ok(())
+            }
+            Dispatch::ToggleOverview => {
+                self.overview_visible = !self.overview_visible;
+                self.desktop_state_dirty = true;
+                self.request_repaint();
+                Ok(())
+            }
+            Dispatch::SetOverviewVisible(visible) => {
+                if self.overview_visible != visible {
+                    self.overview_visible = visible;
+                    self.desktop_state_dirty = true;
+                    self.request_repaint();
+                }
                 Ok(())
             }
         }
