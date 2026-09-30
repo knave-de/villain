@@ -15,3 +15,5 @@ These local documents describe Villain's responsibilities without duplicating
 the umbrella policy.
 
 - [Maximization policy and verification](maximization.md)
+
+- [Window appearance](window-appearance.md)

@@ -28,6 +28,7 @@ impl Default for InputConfig {
 #[derive(Clone, Debug)]
 pub struct RuntimeConfig {
     pub master_percent: u8,
+    pub appearance: knave_config::WindowAppearance,
     pub input: InputConfig,
     pub keybinds: KeybindRegistry,
     pub environment: BTreeMap<String, String>,
@@ -105,6 +106,7 @@ impl RuntimeConfig {
 
         Ok(Self {
             master_percent: compositor.master_percent,
+            appearance: compositor.appearance.clone(),
             input: InputConfig {
                 tap_to_click: compositor.input.tap_to_click,
                 natural_scroll: compositor.input.natural_scroll,

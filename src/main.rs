@@ -3,6 +3,7 @@
 //! Winit runs nested in a desktop; the TTY backend owns a Linux seat and output.
 //! Both backends use the same Wayland protocol and workspace state.
 
+mod appearance;
 mod backend_selection;
 mod config;
 mod cursor;

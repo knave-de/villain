@@ -364,6 +364,92 @@ fn wayland_floating_and_fullscreen_requests() {
             client.pointer_buttons, 0,
             "divider presses must not reach clients"
         );
+        inspect(&sender, |s| {
+            use knave_config::appearance::{Corners, Edges, WindowAppearance};
+            s.config.appearance.gaps.outer = Edges {
+                top: 10,
+                right: 20,
+                bottom: 30,
+                left: 40,
+            };
+            s.config.appearance.gaps.inner = Edges {
+                top: 2,
+                right: 3,
+                bottom: 4,
+                left: 5,
+            };
+            s.config.appearance.border.width = Edges {
+                top: 4,
+                right: 4,
+                bottom: 4,
+                left: 4,
+            };
+            s.config.appearance.border.radius = Corners {
+                top_left: 12,
+                top_right: 20,
+                bottom_right: 8,
+                bottom_left: 0,
+            };
+            s.relayout_active_workspace();
+            let layout = s.workspace_layout(0);
+            let first = layout[0].0.clone();
+            assert_eq!(
+                layout[0].1,
+                Rectangle::new((49, 16).into(), (354, 546).into())
+            );
+            assert_eq!(
+                layout[1].1,
+                Rectangle::new((419, 16).into(), (354, 546).into())
+            );
+            s.pointer_location = (75.0, 14.0).into();
+            s.focus_window_at_pointer();
+            assert_eq!(
+                s.keyboard.current_focus(),
+                KeyboardFocus::for_window(&first)
+            );
+            s.pointer_location = (49.5, 16.5).into();
+            assert!(
+                s.input_window_at_pointer().is_none(),
+                "clipped content corners must reject input"
+            );
+            // Gaps must still admit the compositor-owned split grab.
+            s.pointer_location = (410.0, 100.0).into();
+            assert!(s.split_under_pointer().is_some());
+            s.set_window_maximized(&first, true);
+            assert_eq!(
+                s.workspace_layout(0)
+                    .into_iter()
+                    .find(|entry| entry.0 == first)
+                    .unwrap()
+                    .1,
+                Rectangle::from_size((800, 600).into())
+            );
+            s.config.appearance.views.maximized.gaps = true;
+            s.config.appearance.views.maximized.borders = true;
+            s.relayout_active_workspace();
+            assert_eq!(
+                s.workspace_layout(0)
+                    .into_iter()
+                    .find(|entry| entry.0 == first)
+                    .unwrap()
+                    .1,
+                Rectangle::new((44, 14).into(), (732, 552).into())
+            );
+            s.set_window_fullscreen(&first, true);
+            assert_eq!(
+                s.workspace_layout(0)
+                    .into_iter()
+                    .find(|entry| entry.0 == first)
+                    .unwrap()
+                    .1,
+                Rectangle::from_size((800, 600).into())
+            );
+            s.set_window_fullscreen(&first, false);
+            s.set_window_maximized(&first, false);
+            s.config.appearance = WindowAppearance::default();
+            s.relayout_active_workspace();
+        });
+        settle(&mut queue, &mut client);
         let (dialog, _dx, dt) = create(3, "dialog");
         dt.set_parent(Some(&at));
         dialog.commit();

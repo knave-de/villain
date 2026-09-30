@@ -46,6 +46,7 @@ use crate::workspaces::Workspace;
 /// mutable reference to it into callbacks, so the first version does not need
 /// `Arc<Mutex<_>>` for its own state.
 pub struct Villain {
+    pub(crate) appearance_renderer: crate::appearance::render::EffectsRenderer,
     pub tty: Option<crate::tty::Tty>,
     pub winit: Option<crate::render::Winit>,
     pub dmabuf_state: smithay::wayland::dmabuf::DmabufState,
@@ -142,6 +143,7 @@ impl Villain {
         let pointer = seat.add_pointer();
 
         Self {
+            appearance_renderer: Default::default(),
             tty: None,
             winit: None,
             dmabuf_state: smithay::wayland::dmabuf::DmabufState::new(),
@@ -270,6 +272,7 @@ impl SeatHandler for Villain {
         focused: Option<&Self::KeyboardFocus>,
     ) {
         self.desktop_state_dirty = true;
+        self.request_repaint();
         let client = focused.and_then(|focus| {
             smithay::wayland::seat::WaylandFocus::wl_surface(focus)
                 .and_then(|surface| surface.client())

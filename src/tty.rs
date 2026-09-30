@@ -18,7 +18,6 @@ use smithay::{
         session::{Event as SessionEvent, Session, libseat::LibSeatSession},
         udev::{all_gpus, primary_gpu},
     },
-    desktop::space::render_output,
     input::pointer::{AxisFrame, ButtonEvent},
     output::{Mode, Output, PhysicalProperties, Subpixel},
     reexports::{
@@ -264,16 +263,13 @@ impl Tty {
             state
                 .cursor
                 .render_elements(&mut self.renderer, state.pointer_location, now);
-        let elements = crate::overview_render::elements(state, &mut self.renderer, cursor_elements);
-        let result = render_output(
-            &self.output,
+        let elements =
+            crate::overview_render::elements(state, &mut self.renderer, cursor_elements)?;
+        let result = self.damage.render_output(
             &mut self.renderer,
             &mut framebuffer,
-            1.0,
             usize::from(age),
-            [&state.space],
             &elements,
-            &mut self.damage,
             [0.08, 0.05, 0.12, 1.0],
         )?;
         let sync = result.sync.clone();

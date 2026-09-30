@@ -2,13 +2,9 @@
 
 use smithay::{
     backend::renderer::{
-        element::{
-            AsRenderElements,
-            surface::WaylandSurfaceRenderElement,
-            utils::{
-                ConstrainAlign, ConstrainScaleBehavior, CropRenderElement, Relocate,
-                RelocateRenderElement, RescaleRenderElement, constrain_render_elements,
-            },
+        element::utils::{
+            ConstrainAlign, ConstrainScaleBehavior, CropRenderElement, Relocate,
+            RelocateRenderElement, RescaleRenderElement, constrain_render_elements,
         },
         gles::GlesRenderer,
     },
@@ -19,7 +15,7 @@ use crate::{cursor::CursorRenderElement, state::Villain};
 
 type PaneElement = RelocateRenderElement<
     CropRenderElement<
-        RelocateRenderElement<RescaleRenderElement<WaylandSurfaceRenderElement<GlesRenderer>>>,
+        RelocateRenderElement<RescaleRenderElement<crate::appearance::render::EffectElement>>,
     >,
 >;
 
@@ -27,23 +23,27 @@ smithay::backend::renderer::element::render_elements! {
     pub OverviewRenderElement<=GlesRenderer>;
     Cursor=CursorRenderElement,
     Pane=PaneElement,
+    Scene=crate::appearance::render::EffectElement,
 }
 
 pub fn elements(
-    state: &Villain,
+    state: &mut Villain,
     renderer: &mut GlesRenderer,
     cursor: Vec<CursorRenderElement>,
-) -> Vec<OverviewRenderElement> {
+) -> Result<Vec<OverviewRenderElement>, crate::appearance::render::EffectError> {
     let mut result: Vec<_> = cursor
         .into_iter()
         .map(OverviewRenderElement::Cursor)
         .collect();
     let output = state.output_size;
     let reference: Rectangle<i32, Physical> = Rectangle::from_size((output.w, output.h).into());
-    for pane in state.overview_panes.iter().rev() {
-        let Some(scene) = state.workspace_preview_scene(pane.workspace.0 as usize - 1) else {
+    for pane in state.overview_panes.clone().iter().rev() {
+        if state
+            .workspace_preview_scene(pane.workspace.0 as usize - 1)
+            .is_none()
+        {
             continue;
-        };
+        }
         let Ok(width) = i32::try_from(pane.width) else {
             continue;
         };
@@ -53,20 +53,10 @@ pub fn elements(
         // Smithay constrains in the source coordinate space; the crop must be
         // pane-local, then the completed element moves to its output position.
         let crop = Rectangle::from_size((width, height).into());
-        let windows: Vec<_> = scene
-            .windows
-            .into_iter()
-            .rev()
-            .flat_map(|(window, geometry)| {
-                AsRenderElements::<GlesRenderer>::render_elements(
-                    &window,
-                    renderer,
-                    geometry.loc.to_physical_precise_round(Scale::from(1.0)),
-                    Scale::from(1.0),
-                    1.0,
-                )
-            })
-            .collect();
+        let mut effects = std::mem::take(&mut state.appearance_renderer);
+        let windows = effects.scene(state, renderer, pane.workspace.0 as usize - 1, false);
+        state.appearance_renderer = effects;
+        let windows = windows?;
         result.extend(
             constrain_render_elements(
                 windows,
@@ -83,5 +73,9 @@ pub fn elements(
             .map(OverviewRenderElement::Pane),
         );
     }
-    result
+    let mut effects = std::mem::take(&mut state.appearance_renderer);
+    let scene = effects.scene(state, renderer, state.active_workspace, true);
+    state.appearance_renderer = effects;
+    result.extend(scene?.into_iter().map(OverviewRenderElement::Scene));
+    Ok(result)
 }
