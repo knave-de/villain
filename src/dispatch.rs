@@ -177,19 +177,28 @@ impl Villain {
                 Ok(())
             }
             Dispatch::ToggleOverview => {
-                self.overview_visible = !self.overview_visible;
-                self.desktop_state_dirty = true;
-                self.request_repaint();
+                self.set_overview_visible(!self.overview_visible);
                 Ok(())
             }
             Dispatch::SetOverviewVisible(visible) => {
-                if self.overview_visible != visible {
-                    self.overview_visible = visible;
-                    self.desktop_state_dirty = true;
-                    self.request_repaint();
-                }
+                self.set_overview_visible(visible);
                 Ok(())
             }
+        }
+    }
+
+    fn set_overview_visible(&mut self, visible: bool) {
+        if self.overview_visible != visible {
+            if !visible {
+                for entry in &mut self.shell_surfaces {
+                    if entry.mapped && entry.layer.namespace() == "knave-shell-overview" {
+                        entry.hide_pending = true;
+                    }
+                }
+            }
+            self.overview_visible = visible;
+            self.desktop_state_dirty = true;
+            self.request_repaint();
         }
     }
 }
