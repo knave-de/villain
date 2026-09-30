@@ -1376,6 +1376,11 @@ impl Villain {
         if self.focus_layer_at_pointer() {
             return;
         }
+        if self.host_focused && matches!(self.layer_under_pointer(true), Some((_, _, None))) {
+            // A noninteractive panel receives the click, not the obscured window.
+            self.restore_active_workspace_focus();
+            return;
+        }
         let hit = self
             .space
             .element_under(self.pointer_location)

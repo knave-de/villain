@@ -272,6 +272,61 @@ fn layer_lifecycle_focus_and_workspace_independence() {
         top.unset_maximized();
         settle(&mut queue, &mut client);
         inspect(&sender, |s| assert!(!s.window_info()[0].maximized));
+        let other = compositor.create_surface(&qh, ());
+        let other_xdg = wm.get_xdg_surface(&other, &qh, ());
+        let other_top = other_xdg.get_toplevel(&qh, ());
+        other.commit();
+        settle(&mut queue, &mut client);
+        let app_buffer =
+            pool.create_buffer(0, 400, 600, 400 * 4, wl_shm::Format::Argb8888, &qh, ());
+        app.attach(Some(&app_buffer), 0, 0);
+        app.commit();
+        other.attach(Some(&app_buffer), 0, 0);
+        other.commit();
+        settle(&mut queue, &mut client);
+        for kind in [shell::Layer::Top, shell::Layer::Overlay] {
+            for zone in [0, -1] {
+                layer.set_layer(kind);
+                layer.set_exclusive_zone(zone);
+                surface.commit();
+                settle(&mut queue, &mut client);
+                inspect(&sender, |s| {
+                    let expected = s.keyboard.current_focus();
+                    assert!(expected.is_some());
+                    s.pointer_location = (10.0, 10.0).into();
+                    let obscured = s.space.element_under(s.pointer_location).unwrap().0;
+                    assert_ne!(KeyboardFocus::for_window(obscured), expected);
+                    s.refresh_pointer_and_focus(0);
+                    assert_eq!(
+                        s.pointer.current_focus().as_ref(),
+                        Some(s.shell_surfaces[0].layer.wl_surface())
+                    );
+                    assert_eq!(
+                        s.keyboard.current_focus(),
+                        expected,
+                        "overlapping noninteractive panels must preserve focus"
+                    );
+                    s.keyboard.clone().set_focus(
+                        s,
+                        None,
+                        smithay::utils::SERIAL_COUNTER.next_serial(),
+                    );
+                    s.refresh_pointer_and_focus(0);
+                    assert_eq!(
+                        s.keyboard.current_focus(),
+                        expected,
+                        "panel clicks recover MRU focus"
+                    );
+                });
+            }
+        }
+        other_top.destroy();
+        other_xdg.destroy();
+        other.destroy();
+        layer.set_layer(shell::Layer::Top);
+        layer.set_exclusive_zone(40);
+        surface.commit();
+        settle(&mut queue, &mut client);
         layer.set_keyboard_interactivity(layer::KeyboardInteractivity::Exclusive);
         surface.commit();
         settle(&mut queue, &mut client);
