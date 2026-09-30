@@ -758,7 +758,7 @@ checksum = "e2db585e1d738fc771bf08a151420d3ed193d9d895a36df7f6f8a9456b911ddc"
 [[package]]
 name = "knave-config"
 version = "0.1.0"
-source = "git+https://github.com/knave-de/knave.git?rev=ec05661e451112586cf6b97f6516c20304d8bd05#ec05661e451112586cf6b97f6516c20304d8bd05"
+source = "git+https://github.com/knave-de/knave.git?rev=3ef4a82a2dd173999f0500515f69b79fc9c32b88#3ef4a82a2dd173999f0500515f69b79fc9c32b88"
 dependencies = [
  "serde",
  "thiserror 2.0.20",

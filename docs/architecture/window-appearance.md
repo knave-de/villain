@@ -1,11 +1,9 @@
 # Window appearance implementation
 
 Knave owns `[compositor.appearance]` in its canonical config. Villain consumes
-`knave-config` at `ec05661e451112586cf6b97f6516c20304d8bd05`; desktop API remains
-pinned at `6b86b3c52d8ac2093d3a2d421735c1f35b06cb9a`. The config commit must be
-published before fresh remote consumers can resolve the new pin. Local locked
-builds were verified with that commit imported into Cargo's git cache, without
-a committed machine-specific Cargo patch.
+`knave-config` at `3ef4a82a2dd173999f0500515f69b79fc9c32b88`; desktop API remains
+pinned at `6b86b3c52d8ac2093d3a2d421735c1f35b06cb9a`. The configuration revision is published on Knave master. Locked builds resolve
+the merged revision without a machine-specific Cargo patch.
 
 Configure `gaps.outer` and `gaps.inner` using top/right/bottom/left logical pixels.
 Adjacent tiles add their inner-edge contributions. Outer gaps follow panel

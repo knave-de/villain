@@ -27,7 +27,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 xcursor = "0.3.11"
 knave-desktop-api = { git = "https://github.com/knave-de/knave.git", rev = "6b86b3c52d8ac2093d3a2d421735c1f35b06cb9a" }
-knave-config = { git = "https://github.com/knave-de/knave.git", rev = "ec05661e451112586cf6b97f6516c20304d8bd05" }
+knave-config = { git = "https://github.com/knave-de/knave.git", rev = "3ef4a82a2dd173999f0500515f69b79fc9c32b88" }
 serde_json = "1"
 base64 = "0.22"
 png = "0.18"
