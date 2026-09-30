@@ -108,6 +108,16 @@ the direct/nested live-test coverage.
 - [Change-impact checklist](docs/architecture/change-impact.md)
 - [Agent instructions](AGENTS.md)
 
+## Window focus
+
+Clicks on empty space or noninteractive panels preserve the focused visible
+window. If focus is missing, the most recently focused visible window is
+selected. Workspace switches, minimization, and closure also restore visible
+window focus. Keyboard-interactive shell surfaces such as overview and launchers
+can take focus; empty workspaces, fully minimized workspaces, host focus loss,
+and suspended TTY sessions can have no focused window. Shortcut-driven focus
+changes wait until compositor-intercepted keys are released.
+
 ## Maximize and restore
 
 `MOD+F` toggles maximization in the default binding set. Maximized windows fill

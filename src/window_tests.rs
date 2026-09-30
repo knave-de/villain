@@ -233,6 +233,39 @@ fn wayland_floating_and_fullscreen_requests() {
         b.commit();
         settle(&mut queue, &mut client);
         inspect(&sender, |s| {
+            let focus = s.keyboard.current_focus();
+            s.pointer_location = (2000.0, 100.0).into();
+            s.refresh_pointer_and_focus(0);
+            assert_eq!(
+                s.keyboard.current_focus(),
+                focus,
+                "empty clicks retain focus"
+            );
+            assert!(find(s, "other").focused);
+            s.keyboard
+                .clone()
+                .set_focus(s, None, SERIAL_COUNTER.next_serial());
+            s.refresh_pointer_and_focus(0);
+            assert!(
+                find(s, "other").focused,
+                "empty clicks recover missing focus"
+            );
+            s.switch_workspace(1);
+            s.refresh_pointer_and_focus(0);
+            assert!(s.keyboard.current_focus().is_none());
+            s.switch_workspace(0);
+            s.host_focused = false;
+            s.refresh_pointer_and_focus(0);
+            assert!(s.keyboard.current_focus().is_none());
+            s.host_focused = true;
+            s.restore_active_workspace_focus();
+            s.pointer_location = (100.0, 100.0).into();
+            s.refresh_pointer_and_focus(0);
+            assert!(
+                find(s, "primary").focused,
+                "window clicks still change focus"
+            );
+            s.focus_window(find(s, "other").id);
             use crate::dispatch::Dispatch;
             use smithay::backend::input::ButtonState;
             let focus = s.keyboard.current_focus();

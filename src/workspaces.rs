@@ -1376,6 +1376,11 @@ impl Villain {
         if self.focus_layer_at_pointer() {
             return;
         }
+        if self.host_focused && matches!(self.layer_under_pointer(true), Some((_, _, None))) {
+            // A noninteractive panel receives the click, not the obscured window.
+            self.restore_active_workspace_focus();
+            return;
+        }
         let hit = self
             .space
             .element_under(self.pointer_location)
@@ -1404,6 +1409,11 @@ impl Villain {
                         KeyboardFocus::for_window(window)
                     }
                 });
+        if keyboard_surface.is_none() && self.host_focused {
+            // Empty space must not deactivate a visible workspace window.
+            self.restore_active_workspace_focus();
+            return;
+        }
         let focused_window = keyboard_surface.as_ref().and_then(|focus| {
             self.workspaces
                 .iter()
