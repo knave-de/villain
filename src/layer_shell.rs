@@ -15,6 +15,7 @@ pub struct ShellSurface {
     pub layer: LayerSurface,
     pub output: Output,
     pub mapped: bool,
+    pub hide_pending: bool,
 }
 
 impl WlrLayerShellHandler for Villain {
@@ -41,16 +42,22 @@ impl WlrLayerShellHandler for Villain {
             layer: LayerSurface::new(surface, namespace),
             output,
             mapped: false,
+            hide_pending: false,
         });
     }
 
     fn layer_destroyed(&mut self, surface: wlr_layer::LayerSurface) {
-        self.dismiss_layer_popups(surface.wl_surface());
-        if self.shell_surfaces.iter().any(|entry| {
+        let was_overview = self.shell_surfaces.iter().any(|entry| {
             entry.layer.layer_surface() == &surface
                 && entry.layer.namespace() == "knave-shell-overview"
-        }) {
+        });
+        let had_keyboard_focus = self.keyboard.current_focus()
+            == Some(KeyboardFocus::Wayland(surface.wl_surface().clone()));
+        self.dismiss_layer_popups(surface.wl_surface());
+        if was_overview {
             self.overview_panes.clear();
+            self.overview_visible = false;
+            self.desktop_state_dirty = true;
             self.request_repaint();
         }
         self.shell_surfaces.retain(|entry| {
@@ -62,6 +69,9 @@ impl WlrLayerShellHandler for Villain {
             }
         });
         self.relayout_active_workspace();
+        if had_keyboard_focus {
+            self.restore_active_workspace_focus();
+        }
     }
 }
 
@@ -107,6 +117,12 @@ impl Villain {
         entry.mapped = mapped;
         if !mapped && entry.layer.namespace() == "knave-shell-overview" {
             self.overview_panes.clear();
+            // A late unmap can acknowledge an earlier hide after Super reopened it.
+            let expected_hide = std::mem::take(&mut entry.hide_pending);
+            if was_mapped && !expected_hide && self.overview_visible {
+                self.overview_visible = false;
+                self.desktop_state_dirty = true;
+            }
         }
         if was_mapped && !mapped {
             self.dismiss_layer_popups(surface);
@@ -122,6 +138,11 @@ impl Villain {
         {
             self.release_pointer_buttons();
             self.focus_layer(focus);
+        } else if was_mapped
+            && !mapped
+            && self.keyboard.current_focus() == Some(KeyboardFocus::Wayland(surface.clone()))
+        {
+            self.restore_active_workspace_focus();
         }
         self.request_repaint();
         true

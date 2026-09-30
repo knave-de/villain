@@ -143,7 +143,8 @@ pub fn init(
                         {
                             Reply::Response(DesktopResponse::Error(DesktopError {
                                 code: DesktopErrorCode::IncompatibleVersion,
-                                message: "Snapshot subscriptions require desktop API 1.2".into(),
+                                message: "Snapshot subscriptions require desktop API 1.2 or newer"
+                                    .into(),
                                 retryable: false,
                             }))
                         } else if let Some(subscriber) = envelope.subscriber {
@@ -374,6 +375,7 @@ impl Villain {
         self.desktop_state_dirty = false;
         let snapshot = DesktopSnapshot {
             generation: 0,
+            overview_visible: self.overview_visible,
             workspaces: self.workspace_info(),
             windows: self.window_info(),
         };

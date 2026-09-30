@@ -49,7 +49,9 @@ pub(super) struct Subscriptions {
 impl Subscriptions {
     pub(super) fn publish(&mut self, mut snapshot: DesktopSnapshot) {
         if self.snapshot.as_ref().is_some_and(|old| {
-            old.windows == snapshot.windows && old.workspaces == snapshot.workspaces
+            old.overview_visible == snapshot.overview_visible
+                && old.windows == snapshot.windows
+                && old.workspaces == snapshot.workspaces
         }) {
             return;
         }
@@ -141,6 +143,50 @@ pub(super) fn serve(
         let frame = subscriber.latest.lock().unwrap().take();
         if let Some(frame) = frame {
             stream.write_all(&frame)?;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn visibility_only_changes_publish_and_wake_subscribers() {
+        let mut subscriptions = Subscriptions::default();
+        let mut snapshot = DesktopSnapshot {
+            generation: 0,
+            overview_visible: false,
+            workspaces: Vec::new(),
+            windows: Vec::new(),
+        };
+        subscriptions.publish(snapshot.clone());
+        let (subscriber, mut wake) = Subscriber::new().unwrap();
+        subscriptions.subscribe(&subscriber);
+
+        for (visible, generation) in [(true, 2), (false, 3)] {
+            snapshot.overview_visible = visible;
+            subscriptions.publish(snapshot.clone());
+            let mut byte = [0];
+            assert_eq!(wake.read(&mut byte).unwrap(), 1);
+            let frame = subscriber.latest.lock().unwrap().take().unwrap();
+            let DesktopResponse::Snapshot(published) = serde_json::from_slice(&frame).unwrap()
+            else {
+                panic!("expected a snapshot");
+            };
+            assert_eq!(published.overview_visible, visible);
+            assert_eq!(published.generation, generation);
+
+            subscriptions.publish(snapshot.clone());
+            assert!(subscriber.latest.lock().unwrap().is_none());
+            assert_eq!(
+                wake.read(&mut byte).unwrap_err().kind(),
+                io::ErrorKind::WouldBlock
+            );
+            assert_eq!(
+                subscriptions.snapshot.as_ref().unwrap().generation,
+                generation
+            );
         }
     }
 }

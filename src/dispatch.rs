@@ -24,6 +24,8 @@ pub enum Dispatch {
     RestoreWindow(WindowId),
     Spawn(Vec<String>),
     Quit,
+    ToggleOverview,
+    SetOverviewVisible(bool),
 }
 
 impl From<DesktopCommand> for Dispatch {
@@ -43,6 +45,7 @@ impl From<DesktopCommand> for Dispatch {
             DesktopCommand::RestoreWindow { window } => Self::RestoreWindow(window),
             DesktopCommand::Spawn { argv } => Self::Spawn(argv),
             DesktopCommand::Quit => Self::Quit,
+            DesktopCommand::SetOverviewVisible { visible } => Self::SetOverviewVisible(visible),
         }
     }
 }
@@ -173,6 +176,29 @@ impl Villain {
                 self.loop_signal.stop();
                 Ok(())
             }
+            Dispatch::ToggleOverview => {
+                self.set_overview_visible(!self.overview_visible);
+                Ok(())
+            }
+            Dispatch::SetOverviewVisible(visible) => {
+                self.set_overview_visible(visible);
+                Ok(())
+            }
+        }
+    }
+
+    fn set_overview_visible(&mut self, visible: bool) {
+        if self.overview_visible != visible {
+            if !visible {
+                for entry in &mut self.shell_surfaces {
+                    if entry.mapped && entry.layer.namespace() == "knave-shell-overview" {
+                        entry.hide_pending = true;
+                    }
+                }
+            }
+            self.overview_visible = visible;
+            self.desktop_state_dirty = true;
+            self.request_repaint();
         }
     }
 }
