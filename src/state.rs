@@ -47,6 +47,8 @@ use crate::workspaces::Workspace;
 /// `Arc<Mutex<_>>` for its own state.
 pub struct Villain {
     pub(crate) appearance_renderer: crate::appearance::render::EffectsRenderer,
+
+    pub(crate) capture: crate::capture::CaptureState,
     pub tty: Option<crate::tty::Tty>,
     pub winit: Option<crate::render::Winit>,
     pub dmabuf_state: smithay::wayland::dmabuf::DmabufState,
@@ -142,8 +144,11 @@ impl Villain {
             .expect("initialize keyboard");
         let pointer = seat.add_pointer();
 
+        crate::capture::init(&display_handle);
         Self {
             appearance_renderer: Default::default(),
+
+            capture: crate::capture::CaptureState::default(),
             tty: None,
             winit: None,
             dmabuf_state: smithay::wayland::dmabuf::DmabufState::new(),
@@ -178,7 +183,10 @@ impl Villain {
             xwayland_display: None,
             owns_session: false,
             activation: crate::session::ActivationWorker::new(),
-            shm_state: ShmState::new::<Self>(&display_handle, vec![]),
+            shm_state: ShmState::new::<Self>(
+                &display_handle,
+                vec![smithay::reexports::wayland_server::protocol::wl_shm::Format::Abgr8888],
+            ),
             data_device_state,
             primary_selection_state,
             wlr_data_control_state,
