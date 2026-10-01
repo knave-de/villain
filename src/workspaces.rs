@@ -883,6 +883,9 @@ impl Villain {
 
     pub fn relayout_active_workspace(&mut self) {
         self.desktop_state_dirty = true;
+        // Empty workspaces have no client commits to wake the output after
+        // a switch or the last window's destruction.
+        self.request_repaint();
         self.map_active_workspace();
         // An implicit button grab must not survive minimizing its window.
         if self
