@@ -9,7 +9,6 @@ use smithay::{
             gles::{GlesRenderbuffer, GlesRenderer},
         },
     },
-    desktop::space::render_output,
     output::Output,
     reexports::{
         calloop::timer::{TimeoutAction, Timer},
@@ -454,24 +453,22 @@ fn render_with(
     } else {
         Vec::new()
     };
-    let elements = crate::overview_render::elements(state, renderer, cursors);
+    let elements =
+        crate::overview_render::elements(state, renderer, cursors).map_err(|e| e.to_string())?;
     let mut damage = OutputDamageTracker::new(
         Size::<i32, Physical>::from((size.w, size.h)),
         output.current_scale().fractional_scale(),
         Transform::Normal,
     );
-    let result = render_output(
-        output,
-        renderer,
-        &mut framebuffer,
-        1.0,
-        0,
-        [&state.space],
-        &elements,
-        &mut damage,
-        [0.08, 0.05, 0.12, 1.0],
-    )
-    .map_err(|e| format!("{e:?}"))?;
+    let result = damage
+        .render_output(
+            renderer,
+            &mut framebuffer,
+            0,
+            &elements,
+            [0.08, 0.05, 0.12, 1.0],
+        )
+        .map_err(|e| format!("{e:?}"))?;
     result.sync.wait().map_err(|e| e.to_string())?;
     let mapping = renderer
         .copy_framebuffer(&framebuffer, Rectangle::from_size(size), Fourcc::Abgr8888)
