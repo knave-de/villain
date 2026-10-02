@@ -5,6 +5,7 @@
 
 mod appearance;
 mod backend_selection;
+mod capture;
 mod config;
 mod cursor;
 mod dispatch;

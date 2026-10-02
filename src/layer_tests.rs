@@ -19,6 +19,19 @@ use wayland_protocols_wlr::layer_shell::v1::client::{
 struct Client {
     sizes: Vec<(u32, u32)>,
     app_size: (i32, i32),
+    frames: usize,
+}
+impl Dispatch<wayland_client::protocol::wl_callback::WlCallback, ()> for Client {
+    fn event(
+        state: &mut Self,
+        _: &wayland_client::protocol::wl_callback::WlCallback,
+        _: wayland_client::protocol::wl_callback::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        state.frames += 1;
+    }
 }
 impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for Client {
     fn event(
@@ -223,7 +236,9 @@ fn layer_lifecycle_focus_and_workspace_independence() {
                     )),
                 "noninteractive panel must not take keyboard focus"
             );
+            s.repaint_needed = false;
             s.switch_workspace(4);
+            assert!(s.repaint_needed, "empty workspace transitions must repaint");
             assert!(s.shell_surfaces[0].mapped);
             assert_eq!(s.window_info().len(), 1);
         });
@@ -458,6 +473,34 @@ fn layer_lifecycle_focus_and_workspace_independence() {
         overview.destroy();
         settle(&mut queue, &mut client);
         inspect(&sender, |s| assert!(!s.overview_visible));
+        inspect(&sender, |s| {
+            s.switch_workspace(0);
+            s.repaint_needed = false;
+        });
+        top.destroy();
+        xdg.destroy();
+        app.destroy();
+        settle(&mut queue, &mut client);
+        inspect(&sender, |s| {
+            assert!(s.window_info().is_empty());
+            assert!(s.repaint_needed, "closing the last window must repaint");
+            s.pointer_location = (10.0, 10.0).into();
+            s.refresh_pointer(0);
+            assert_eq!(
+                s.pointer.current_focus().as_ref(),
+                Some(s.shell_surfaces[0].layer.wl_surface())
+            );
+        });
+        surface.frame(&qh, ());
+        surface.commit();
+        settle(&mut queue, &mut client);
+        inspect(&sender, |s| {
+            let output = s.space.outputs().next().unwrap().clone();
+            s.schedule_frame_callbacks(&output);
+        });
+        while client.frames == 0 {
+            queue.blocking_dispatch(&mut client).unwrap();
+        }
         layer.destroy();
         surface.destroy();
         settle(&mut queue, &mut client);
@@ -467,7 +510,7 @@ fn layer_lifecycle_focus_and_workspace_independence() {
             s.switch_workspace(0);
             s.pointer_location = (2000.0, 100.0).into();
             s.refresh_pointer_and_focus(0);
-            assert!(s.window_info()[0].focused);
+            assert!(s.keyboard.current_focus().is_none());
         });
     });
     let deadline = Instant::now() + Duration::from_secs(20);

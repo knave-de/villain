@@ -25,6 +25,9 @@ const ACTIVATION_KEYS: &[&str] = &[
     "XDG_SESSION_DESKTOP",
     "XDG_SESSION_TYPE",
     "XDG_DATA_DIRS",
+    "PATH",
+    "XDP_KNAVE_SHELL_BINARY",
+    "XDP_KNAVE_ENABLED",
 ];
 /// Removes the Wayland socket owned by one Villain process on every exit path.
 pub struct SocketCleanup {
@@ -59,6 +62,37 @@ impl Drop for SocketCleanup {
 
 /// Complete the environment inherited by compositor-launched applications.
 pub fn prepare_environment(state: &mut Villain) {
+    if std::env::var_os("KNAVE_SESSION").as_deref() == Some(OsStr::new("1")) {
+        state
+            .config
+            .environment
+            .insert("XDG_CURRENT_DESKTOP".into(), "Knave:Villain".into());
+        state
+            .config
+            .environment
+            .insert("XDG_SESSION_DESKTOP".into(), "knave".into());
+        for key in ["PATH", "XDP_KNAVE_SHELL_BINARY", "XDP_KNAVE_ENABLED"] {
+            if let Ok(value) = std::env::var(key) {
+                state.config.environment.insert(key.into(), value);
+            }
+        }
+        if let Some(home) = std::env::var_os("HOME") {
+            let data = PathBuf::from(home).join(".local/share");
+            let current = state
+                .config
+                .environment
+                .get("XDG_DATA_DIRS")
+                .cloned()
+                .or_else(|| std::env::var("XDG_DATA_DIRS").ok())
+                .unwrap_or_else(|| "/usr/local/share:/usr/share".into());
+            if !current.split(':').any(|entry| Path::new(entry) == data) {
+                state.config.environment.insert(
+                    "XDG_DATA_DIRS".into(),
+                    format!("{}:{current}", data.display()),
+                );
+            }
+        }
+    }
     state.config.environment.insert(
         "WAYLAND_DISPLAY".into(),
         state.socket_name.to_string_lossy().into_owned(),
@@ -233,6 +267,7 @@ fn activate_in_background(
                     "try-restart",
                     "--no-block",
                     "xdg-desktop-portal-gtk.service",
+                    "xdg-desktop-portal-knave.service",
                 ])
                 .envs(&environment),
             "restart the GTK portal backend for Villain",
