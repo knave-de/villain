@@ -758,7 +758,7 @@ checksum = "e2db585e1d738fc771bf08a151420d3ed193d9d895a36df7f6f8a9456b911ddc"
 [[package]]
 name = "knave-capture-protocol"
 version = "0.1.0"
-source = "git+https://github.com/knave-de/knave.git?rev=581750726e76245d85e3d3c7131f3c848802b27b#581750726e76245d85e3d3c7131f3c848802b27b"
+source = "git+https://github.com/knave-de/knave.git?rev=499584e2e68ddc4527157ca69d0c0c7d711e8daf#499584e2e68ddc4527157ca69d0c0c7d711e8daf"
 dependencies = [
  "wayland-backend",
  "wayland-protocols",

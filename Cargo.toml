@@ -10,7 +10,7 @@ members = []
 resolver = "3"
 
 [dependencies]
-knave-capture-protocol = { git = "https://github.com/knave-de/knave.git", rev = "581750726e76245d85e3d3c7131f3c848802b27b", features = ["server"] }
+knave-capture-protocol = { git = "https://github.com/knave-de/knave.git", rev = "499584e2e68ddc4527157ca69d0c0c7d711e8daf", features = ["server"] }
 libc = "0.2"
 toml = "0.9"
 smithay = { version = "0.7.0", default-features = false, features = [
