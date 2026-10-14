@@ -219,6 +219,14 @@ fn layer_lifecycle_focus_and_workspace_independence() {
         settle(&mut queue, &mut client);
         inspect(&sender, |s| {
             assert!(s.shell_surfaces[0].mapped);
+            assert!(
+                !s.workspace_has_fullscreen(s.active_workspace),
+                "the initial workspace must not enter fullscreen"
+            );
+            assert!(
+                s.layer_surface_visible(s.shell_surfaces[0].layer.wl_surface()),
+                "top-layer panels remain visible before a window enters fullscreen"
+            );
             assert_eq!(
                 s.usable_area(),
                 Rectangle::new((0, 40).into(), (800, 560).into())
