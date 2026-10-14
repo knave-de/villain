@@ -195,3 +195,15 @@ fullscreen always bypasses effects. Validate with `knave config check` and reloa
 with `knavectl reload` after deploying the matching compositor. See
 [window appearance](docs/architecture/window-appearance.md) for implementation,
 compatibility, rollout and resource behavior; the full TOML reference belongs to Knave.
+
+## Selective screen sharing
+
+Villain exposes standard foreign-toplevel enumeration and window image sources
+for portal window sharing. A window source stays tied to its original window
+across stacking, resizing and workspace switches; closing it stops the source.
+Knave's private workspace capture protocol accepts immutable arbitrary workspace
+sets. It freezes the last allowed frame on excluded workspaces without rendering
+excluded content, and produces black until the first allowed frame. Sessions are
+bounded to eight and canvases to eight million pixels. Shell layers and overview
+panes are excluded from workspace capture. See Knave ADR 0007 for deployment and
+compatibility; multiple-monitor selection remains out of scope.

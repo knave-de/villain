@@ -756,6 +756,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e2db585e1d738fc771bf08a151420d3ed193d9d895a36df7f6f8a9456b911ddc"
 
 [[package]]
+name = "knave-capture-protocol"
+version = "0.1.0"
+source = "git+https://github.com/knave-de/knave.git?rev=499584e2e68ddc4527157ca69d0c0c7d711e8daf#499584e2e68ddc4527157ca69d0c0c7d711e8daf"
+dependencies = [
+ "wayland-backend",
+ "wayland-protocols",
+ "wayland-scanner",
+ "wayland-server",
+]
+
+[[package]]
 name = "knave-config"
 version = "0.1.0"
 source = "git+https://github.com/knave-de/knave.git?rev=3ef4a82a2dd173999f0500515f69b79fc9c32b88#3ef4a82a2dd173999f0500515f69b79fc9c32b88"
@@ -1972,6 +1983,7 @@ name = "villain"
 version = "0.1.0"
 dependencies = [
  "base64",
+ "knave-capture-protocol",
  "knave-config",
  "knave-desktop-api",
  "libc",

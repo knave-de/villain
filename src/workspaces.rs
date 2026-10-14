@@ -140,6 +140,13 @@ impl Workspace {
 }
 
 impl Villain {
+    pub(crate) fn capture_window(&self, id: WindowId) -> Option<Window> {
+        self.workspaces
+            .iter()
+            .flat_map(|workspace| workspace.windows.iter())
+            .find(|entry| entry.id == id)
+            .map(|entry| entry.window.clone())
+    }
     pub(crate) fn master_ratio(&self, index: usize) -> u16 {
         self.workspaces[index]
             .master_ratio
