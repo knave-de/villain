@@ -122,8 +122,7 @@ changes wait until compositor-intercepted keys are released.
 
 `MOD+F` toggles maximization in the default binding set. Maximized windows fill
 usable workspace space, keeping layer-shell panels and application chrome.
-Fullscreen is a separate state and takes precedence while active; top-layer
-surfaces such as the status bar are hidden until fullscreen ends. Unmaximizing
+Fullscreen is a separate state and takes precedence while active. Unmaximizing
 restores tiled placement or saved floating geometry; minimize/restore retains
 the maximized state. Explicitly focusing an unrelated hidden window restores
 the normal layout. Child dialogs remain visible above their maximized parent.

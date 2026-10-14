@@ -124,9 +124,6 @@ impl EffectsRenderer {
             for output in state.space.outputs() {
                 let map = layer_map_for_output(output);
                 for layer in map.layers() {
-                    if !state.layer_surface_visible(layer.wl_surface()) {
-                        continue;
-                    }
                     let Some(geometry) = map.layer_geometry(layer) else {
                         continue;
                     };

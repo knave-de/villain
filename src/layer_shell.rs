@@ -181,10 +181,8 @@ impl Villain {
     }
 
     pub fn layer_surface_visible(&self, surface: &WlSurface) -> bool {
-        let fullscreen_hides_top = self.workspace_has_fullscreen(self.active_workspace);
         self.shell_surfaces.iter().any(|e| {
             e.mapped
-                && !(fullscreen_hides_top && e.layer.layer() == Layer::Top)
                 && (e.layer.wl_surface() == surface
                     || layer_map_for_output(&e.output)
                         .layer_for_surface(surface, WindowSurfaceType::ALL)
@@ -199,7 +197,6 @@ impl Villain {
         for kind in [Layer::Overlay, Layer::Top] {
             if let Some(entry) = self.shell_surfaces.iter().rev().find(|e| {
                 e.mapped
-                    && self.layer_surface_visible(e.layer.wl_surface())
                     && e.layer.layer() == kind
                     && e.layer.cached_state().keyboard_interactivity
                         == KeyboardInteractivity::Exclusive
@@ -220,9 +217,6 @@ impl Villain {
             [Layer::Bottom, Layer::Background]
         };
         for kind in kinds {
-            if kind == Layer::Top && self.workspace_has_fullscreen(self.active_workspace) {
-                continue;
-            }
             for output in self.space.outputs() {
                 let map = layer_map_for_output(output);
                 for layer in map.layers_on(kind).rev() {
