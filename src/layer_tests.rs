@@ -273,6 +273,31 @@ fn layer_lifecycle_focus_and_workspace_independence() {
         layer.set_exclusive_zone(40);
         surface.commit();
         settle(&mut queue, &mut client);
+        // The installed shell may still label its status bar as an overlay.
+        // Fullscreen visibility is keyed to the stable bar namespace as well
+        // as the layer so an older shell cannot cover the application.
+        let overlay_bar_surface = compositor.create_surface(&qh, ());
+        let overlay_bar = shell.get_layer_surface(
+            &overlay_bar_surface,
+            None,
+            shell::Layer::Overlay,
+            "knave-shell-bar".into(),
+            &qh,
+            (),
+        );
+        overlay_bar.set_size(0, 40);
+        overlay_bar.set_anchor(layer::Anchor::Top | layer::Anchor::Left | layer::Anchor::Right);
+        overlay_bar.set_exclusive_zone(0);
+        settle(&mut queue, &mut client);
+        overlay_bar_surface.commit();
+        settle(&mut queue, &mut client);
+        overlay_bar_surface.attach(Some(&buffer), 0, 0);
+        overlay_bar_surface.commit();
+        settle(&mut queue, &mut client);
+        inspect(&sender, |s| {
+            assert!(s.shell_surfaces[1].mapped);
+            assert!(s.layer_surface_visible(s.shell_surfaces[1].layer.wl_surface()));
+        });
         top.set_fullscreen(None);
         settle(&mut queue, &mut client);
         assert_eq!(client.app_size, (800, 600));
@@ -283,7 +308,11 @@ fn layer_lifecycle_focus_and_workspace_independence() {
             );
             assert!(
                 s.layer_under_pointer(true).is_none(),
-                "hidden top-layer panels must not receive pointer input"
+                "hidden panels must not receive pointer input"
+            );
+            assert!(
+                !s.layer_surface_visible(s.shell_surfaces[1].layer.wl_surface()),
+                "the Knave bar must be hidden during fullscreen even if it uses the overlay layer"
             );
             s.pointer_location = (10.0, 10.0).into();
             s.refresh_pointer_and_focus(0);
@@ -303,7 +332,11 @@ fn layer_lifecycle_focus_and_workspace_independence() {
         inspect(&sender, |s| {
             assert!(s.window_info()[0].maximized);
             assert!(s.layer_surface_visible(s.shell_surfaces[0].layer.wl_surface()));
+            assert!(s.layer_surface_visible(s.shell_surfaces[1].layer.wl_surface()));
         });
+        overlay_bar.destroy();
+        overlay_bar_surface.destroy();
+        settle(&mut queue, &mut client);
         top.unset_maximized();
         settle(&mut queue, &mut client);
         inspect(&sender, |s| assert!(!s.window_info()[0].maximized));

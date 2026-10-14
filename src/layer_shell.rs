@@ -27,9 +27,10 @@ impl WlrLayerShellHandler for Villain {
         &mut self,
         surface: wlr_layer::LayerSurface,
         output: Option<WlOutput>,
-        _layer: Layer,
+        layer: Layer,
         namespace: String,
     ) {
+        tracing::info!(%namespace, ?layer, "new layer surface");
         let output = output
             .and_then(|o| Output::from_resource(&o))
             .filter(|o| self.space.outputs().any(|candidate| candidate == o))
@@ -181,14 +182,30 @@ impl Villain {
     }
 
     pub fn layer_surface_visible(&self, surface: &WlSurface) -> bool {
-        let fullscreen_hides_top = self.workspace_has_fullscreen(self.active_workspace);
-        self.shell_surfaces.iter().any(|e| {
-            e.mapped
-                && !(fullscreen_hides_top && e.layer.layer() == Layer::Top)
-                && (e.layer.wl_surface() == surface
-                    || layer_map_for_output(&e.output)
-                        .layer_for_surface(surface, WindowSurfaceType::ALL)
-                        .is_some())
+        let fullscreen_hides_bar = self.workspace_has_fullscreen(self.active_workspace);
+        let hidden = |entry: &ShellSurface| {
+            fullscreen_hides_bar
+                && (entry.layer.layer() == Layer::Top
+                    || entry.layer.namespace() == "knave-shell-bar")
+        };
+
+        // Rendering and hit-testing call this while iterating a locked LayerMap.
+        // Check root surfaces before asking LayerMap about descendants so that
+        // the common path never tries to lock that same map recursively.
+        if let Some(entry) = self
+            .shell_surfaces
+            .iter()
+            .find(|entry| entry.mapped && entry.layer.wl_surface() == surface)
+        {
+            return !hidden(entry);
+        }
+
+        self.shell_surfaces.iter().any(|entry| {
+            entry.mapped
+                && !hidden(entry)
+                && layer_map_for_output(&entry.output)
+                    .layer_for_surface(surface, WindowSurfaceType::ALL)
+                    .is_some()
         })
     }
 
@@ -226,6 +243,9 @@ impl Villain {
             for output in self.space.outputs() {
                 let map = layer_map_for_output(output);
                 for layer in map.layers_on(kind).rev() {
+                    if !self.layer_surface_visible(layer.wl_surface()) {
+                        continue;
+                    }
                     let origin = map.layer_geometry(layer)?.loc.to_f64();
                     if let Some((surface, offset)) =
                         layer.surface_under(self.pointer_location - origin, WindowSurfaceType::ALL)

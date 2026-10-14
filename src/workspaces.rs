@@ -542,6 +542,13 @@ impl Villain {
             }
             return;
         }
+        tracing::info!(
+            window = id.0,
+            workspace = index + 1,
+            active_workspace = self.active_workspace + 1,
+            fullscreen,
+            "window fullscreen state changed"
+        );
         if fullscreen {
             self.workspaces[index].fullscreen = Some(id);
         } else if self.workspaces[index].fullscreen == Some(id) {
