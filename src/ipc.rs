@@ -373,6 +373,7 @@ impl Villain {
             self.request_repaint();
         }
         self.desktop_state_dirty = false;
+        crate::capture_sources::update_windows(self);
         let snapshot = DesktopSnapshot {
             generation: 0,
             overview_visible: self.overview_visible,

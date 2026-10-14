@@ -1,4 +1,5 @@
 //! Bounded standard output capture. Capture-only timers exist while frames are pending.
+use crate::capture_sources::CaptureSource;
 use crate::state::Villain;
 use smithay::{
     backend::{
@@ -37,13 +38,19 @@ const MAX_SESSIONS: usize = 8;
 const MAX_PIXELS: i64 = 8 * 1024 * 1024;
 #[derive(Default)]
 pub struct CaptureState {
+    pub(crate) windows: std::collections::HashMap<
+        u64,
+        smithay::wayland::foreign_toplevel_list::ForeignToplevelHandle,
+    >,
     sessions: Vec<Weak<SessionData>>,
     pending: Vec<frame::ExtImageCopyCaptureFrameV1>,
     scheduled: bool,
 }
-pub struct SourceData(Option<Output>);
+pub struct SourceData(pub(crate) CaptureSource);
 pub struct SessionData {
     output: Option<Output>,
+    target: CaptureSource,
+    last_allowed: Mutex<Option<Arc<Vec<u8>>>>,
     cursor: bool,
     size: Mutex<Size<i32, Buffer>>,
     active: Mutex<bool>,
@@ -56,6 +63,7 @@ pub struct FrameData {
     captured: Mutex<bool>,
 }
 pub fn init(display: &DisplayHandle) {
+    crate::capture_sources::init(display);
     display.create_global::<Villain, sources::ExtOutputImageCaptureSourceManagerV1, _>(1, ());
     display.create_global::<Villain, manager::ExtImageCopyCaptureManagerV1, _>(1, ());
 }
@@ -104,7 +112,13 @@ impl Dispatch<sources::ExtOutputImageCaptureSourceManagerV1, ()> for Villain {
         init: &mut DataInit<'_, Self>,
     ) {
         if let sources::Request::CreateSource { source, output } = request {
-            init.init(source, SourceData(Output::from_resource(&output)));
+            init.init(
+                source,
+                SourceData(
+                    Output::from_resource(&output)
+                        .map_or(CaptureSource::Unavailable, CaptureSource::Output),
+                ),
+            );
         }
     }
 }
@@ -141,17 +155,36 @@ impl Dispatch<manager::ExtImageCopyCaptureManagerV1, ()> for Villain {
                     resource.post_error(manager::Error::InvalidOption, "unknown capture option");
                 }
                 state.capture.sessions.retain(|s| s.strong_count() > 0);
-                let output = source.data::<SourceData>().and_then(|s| s.0.clone());
-                let size = output
+                let target = source
+                    .data::<SourceData>()
+                    .map_or(CaptureSource::Unavailable, |source| source.0.clone());
+                let output = match &target {
+                    CaptureSource::Output(output) | CaptureSource::Workspaces { output, .. } => {
+                        Some(output.clone())
+                    }
+                    CaptureSource::Window(id) if state.capture_window(*id).is_some() => {
+                        state.space.outputs().next().cloned()
+                    }
+                    _ => None,
+                };
+                let mut size = output
                     .as_ref()
                     .and_then(Output::current_mode)
                     .map(|m| Size::<i32, Buffer>::from((m.size.w, m.size.h)))
                     .unwrap_or_default();
+                if let CaptureSource::Window(id) = target {
+                    size = state
+                        .capture_window(id)
+                        .map(|window| window.geometry().size.to_buffer(1, Transform::Normal))
+                        .unwrap_or_default();
+                }
                 let valid = state.capture.sessions.len() < MAX_SESSIONS
                     && size.w > 0
                     && size.h > 0
                     && i64::from(size.w) * i64::from(size.h) <= MAX_PIXELS;
                 let data = Arc::new(SessionData {
+                    target,
+                    last_allowed: Mutex::new(None),
                     output: output.filter(|_| valid),
                     cursor: bits & 1 != 0,
                     size: Mutex::new(size),
@@ -183,6 +216,8 @@ impl Dispatch<cursor::ExtImageCopyCaptureCursorSessionV1, ()> for Villain {
     ) {
         if let cursor::Request::GetCaptureSession { session } = request {
             let data = Arc::new(SessionData {
+                target: CaptureSource::Unavailable,
+                last_allowed: Mutex::new(None),
                 output: None,
                 cursor: false,
                 size: Mutex::new(Size::default()),
@@ -334,14 +369,24 @@ fn finish_pending(state: &mut Villain) {
             frame.failed(frame::FailureReason::Stopped);
             continue;
         }
+        if matches!(data.session.target, CaptureSource::Window(id) if state.capture_window(id).is_none())
+        {
+            *data.session.alive.lock().unwrap() = false;
+            data.session_resource.stopped();
+            frame.failed(frame::FailureReason::Stopped);
+            continue;
+        }
         if let Some(mode) = output.current_mode() {
-            if mode.size.w != size.w || mode.size.h != size.h {
+            if !matches!(data.session.target, CaptureSource::Window(_))
+                && (mode.size.w != size.w || mode.size.h != size.h)
+            {
                 if i64::from(mode.size.w) * i64::from(mode.size.h) > MAX_PIXELS {
                     *data.session.alive.lock().unwrap() = false;
                     data.session_resource.stopped();
                     frame.failed(frame::FailureReason::Stopped);
                 } else {
                     *data.session.size.lock().unwrap() = (mode.size.w, mode.size.h).into();
+                    *data.session.last_allowed.lock().unwrap() = None;
                     constraints(&data.session_resource, &data.session);
                     frame.failed(frame::FailureReason::BufferConstraints);
                 }
@@ -356,11 +401,44 @@ fn finish_pending(state: &mut Villain) {
             frame.failed(frame::FailureReason::BufferConstraints);
             continue;
         };
-        let pixels = render(state, output, data.session.cursor, size);
+        let pixels = match &data.session.target {
+            CaptureSource::Workspaces { allowed, .. }
+                if *allowed & (1 << state.active_workspace) == 0 =>
+            {
+                // Never invoke the renderer while on an excluded workspace.
+                Ok(data
+                    .session
+                    .last_allowed
+                    .lock()
+                    .unwrap()
+                    .get_or_insert_with(|| {
+                        Arc::new({
+                            let mut pixels = vec![0; size.w as usize * size.h as usize * 4];
+                            for pixel in pixels.as_chunks_mut::<4>().0 {
+                                pixel[3] = 255;
+                            }
+                            pixels
+                        })
+                    })
+                    .clone())
+            }
+            _ => render(
+                state,
+                output,
+                data.session.cursor,
+                size,
+                &data.session.target,
+            )
+            .map(Arc::new),
+        };
         let Ok(pixels) = pixels else {
             frame.failed(frame::FailureReason::Unknown);
             continue;
         };
+        if matches!(data.session.target, CaptureSource::Workspaces { allowed, .. } if allowed & (1 << state.active_workspace) != 0)
+        {
+            *data.session.last_allowed.lock().unwrap() = Some(pixels.clone());
+        }
         let valid = with_buffer_contents_mut(&buffer, |ptr, len, info| {
             if info.format != wl_shm::Format::Abgr8888
                 || info.width != size.w
@@ -411,6 +489,14 @@ fn finish_pending(state: &mut Villain) {
             ts.tv_nsec as u32,
         );
         frame.ready();
+        if let CaptureSource::Window(id) = data.session.target
+            && let Some(window) = state.capture_window(id)
+        {
+            // A shared window continues receiving frame callbacks off workspace.
+            window.send_frame(output, state.start_time.elapsed(), None, |_, _| {
+                Some(output.clone())
+            });
+        }
     }
     let _ = state.display_handle.flush_clients();
 }
@@ -419,17 +505,18 @@ fn render(
     output: &Output,
     cursor: bool,
     size: Size<i32, Buffer>,
+    target: &CaptureSource,
 ) -> Result<Vec<u8>, String> {
     if let Some(mut tty) = state.tty.take() {
         let result = if tty.is_active() {
-            render_with(state, &mut tty.renderer, output, cursor, size)
+            render_with(state, &mut tty.renderer, output, cursor, size, target)
         } else {
             Err("session inactive".into())
         };
         state.tty = Some(tty);
         result
     } else if let Some(mut winit) = state.winit.take() {
-        let result = render_with(state, winit.renderer(), output, cursor, size);
+        let result = render_with(state, winit.renderer(), output, cursor, size, target);
         state.winit = Some(winit);
         result
     } else {
@@ -442,6 +529,7 @@ fn render_with(
     output: &Output,
     cursor: bool,
     size: Size<i32, Buffer>,
+    source: &CaptureSource,
 ) -> Result<Vec<u8>, String> {
     let mut target = Offscreen::<GlesRenderbuffer>::create_buffer(renderer, Fourcc::Abgr8888, size)
         .map_err(|e| e.to_string())?;
@@ -453,8 +541,31 @@ fn render_with(
     } else {
         Vec::new()
     };
-    let elements =
-        crate::overview_render::elements(state, renderer, cursors).map_err(|e| e.to_string())?;
+    let elements = match source {
+        CaptureSource::Output(_) => {
+            crate::overview_render::elements(state, renderer, cursors).map_err(|e| e.to_string())?
+        }
+        CaptureSource::Workspaces { .. } => {
+            let mut effects = std::mem::take(&mut state.appearance_renderer);
+            let scene = effects.scene(state, renderer, state.active_workspace, false);
+            state.appearance_renderer = effects;
+            let mut elements: Vec<_> = cursors
+                .into_iter()
+                .map(crate::overview_render::OverviewRenderElement::Cursor)
+                .collect();
+            elements.extend(
+                scene
+                    .map_err(|e| e.to_string())?
+                    .into_iter()
+                    .map(crate::overview_render::OverviewRenderElement::Scene),
+            );
+            elements
+        }
+        CaptureSource::Window(id) => {
+            crate::capture_window::elements(state, renderer, *id, size, cursor)?
+        }
+        CaptureSource::Unavailable => return Err("capture source unavailable".into()),
+    };
     let mut damage = OutputDamageTracker::new(
         Size::<i32, Physical>::from((size.w, size.h)),
         output.current_scale().fractional_scale(),
@@ -466,7 +577,11 @@ fn render_with(
             &mut framebuffer,
             0,
             &elements,
-            [0.08, 0.05, 0.12, 1.0],
+            if matches!(source, CaptureSource::Window(_)) {
+                [0.0, 0.0, 0.0, 1.0]
+            } else {
+                [0.08, 0.05, 0.12, 1.0]
+            },
         )
         .map_err(|e| format!("{e:?}"))?;
     result.sync.wait().map_err(|e| e.to_string())?;

@@ -23,6 +23,7 @@ smithay::backend::renderer::element::render_elements! {
     pub OverviewRenderElement<=GlesRenderer>;
     Cursor=CursorRenderElement,
     Pane=PaneElement,
+    Window=crate::capture_window::WindowElement,
     Scene=crate::appearance::render::EffectElement,
 }
 
