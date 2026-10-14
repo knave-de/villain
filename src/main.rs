@@ -20,6 +20,7 @@ mod layer_shell;
 mod overview_render;
 mod preview;
 mod render;
+mod screenshot;
 mod session;
 mod shutdown;
 mod split_grab;

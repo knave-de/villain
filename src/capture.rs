@@ -35,7 +35,13 @@ use wayland_protocols::ext::{
     },
 };
 const MAX_SESSIONS: usize = 8;
-const MAX_PIXELS: i64 = 8 * 1024 * 1024;
+pub(crate) const MAX_PIXELS: i64 = 8 * 1024 * 1024;
+
+pub(crate) struct CapturedFrame {
+    pub size: Size<i32, Buffer>,
+    pub scale: f64,
+    pub pixels: Vec<u8>,
+}
 #[derive(Default)]
 pub struct CaptureState {
     pub(crate) windows: std::collections::HashMap<
@@ -500,7 +506,7 @@ fn finish_pending(state: &mut Villain) {
     }
     let _ = state.display_handle.flush_clients();
 }
-fn render(
+pub(crate) fn render(
     state: &mut Villain,
     output: &Output,
     cursor: bool,
@@ -610,4 +616,33 @@ fn render_with(
         .cleanup_texture_cache()
         .map_err(|e| e.to_string())?;
     Ok(pixels)
+}
+
+pub(crate) fn screenshot_frame(state: &mut Villain) -> Result<CapturedFrame, String> {
+    let output = state
+        .space
+        .outputs()
+        .next()
+        .cloned()
+        .ok_or_else(|| "no output is available".to_owned())?;
+    let mode = output
+        .current_mode()
+        .ok_or_else(|| "output has no active mode".to_owned())?;
+    let size = Size::<i32, Buffer>::from((mode.size.w, mode.size.h));
+    if size.w <= 0 || size.h <= 0 || i64::from(size.w) * i64::from(size.h) > MAX_PIXELS {
+        return Err("output exceeds the 8 Mi pixel screenshot limit".into());
+    }
+    let scale = output.current_scale().fractional_scale();
+    let pixels = render(
+        state,
+        &output,
+        false,
+        size,
+        &CaptureSource::Output(output.clone()),
+    )?;
+    Ok(CapturedFrame {
+        size,
+        scale,
+        pixels,
+    })
 }

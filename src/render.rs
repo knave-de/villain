@@ -101,9 +101,20 @@ pub fn init_winit(
             }
             WinitEvent::Input(InputEvent::PointerMotionAbsolute { event }) => {
                 state.pointer_location = (event.x(), event.y()).into();
+                if crate::screenshot::pointer_motion(state) {
+                    return;
+                }
                 state.refresh_pointer(event.time_msec());
             }
             WinitEvent::Input(InputEvent::PointerButton { event }) => {
+                if crate::screenshot::pointer_button(
+                    state,
+                    event.button_code(),
+                    event.state() == smithay::backend::input::ButtonState::Pressed,
+                    event.time_msec(),
+                ) {
+                    return;
+                }
                 match event.state() {
                     smithay::backend::input::ButtonState::Pressed => {
                         state.pressed_buttons.insert(event.button_code());
@@ -132,6 +143,9 @@ pub fn init_winit(
                 pointer.frame(state);
             }
             WinitEvent::Input(InputEvent::PointerAxis { event }) => {
+                if state.screenshot.intercepting_pointer() {
+                    return;
+                }
                 let mut frame = AxisFrame::new(event.time_msec()).source(event.source());
                 for axis in [Axis::Horizontal, Axis::Vertical] {
                     let amount = event
@@ -154,6 +168,8 @@ pub fn init_winit(
             WinitEvent::Focus(focused) => {
                 state.host_focused = focused;
                 if !focused {
+                    crate::screenshot::cancel(state, false);
+                    state.screenshot.clear_intercepted_buttons();
                     state.release_pointer_buttons();
                     let keyboard = state.keyboard.clone();
                     for code in keyboard.pressed_keys() {

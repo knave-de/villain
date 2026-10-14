@@ -347,6 +347,9 @@ fn process_input(event: InputEvent<LibinputInputBackend>, state: &mut Villain) {
                 .pointer_location
                 .y
                 .clamp(0.0, f64::from(state.output_size.h - 1));
+            if crate::screenshot::pointer_motion(state) {
+                return;
+            }
             state.refresh_pointer(event.time_msec());
         }
         InputEvent::PointerMotionAbsolute { event } => {
@@ -355,9 +358,20 @@ fn process_input(event: InputEvent<LibinputInputBackend>, state: &mut Villain) {
                 event.y_transformed(state.output_size.h),
             )
                 .into();
+            if crate::screenshot::pointer_motion(state) {
+                return;
+            }
             state.refresh_pointer(event.time_msec());
         }
         InputEvent::PointerButton { event } => {
+            if crate::screenshot::pointer_button(
+                state,
+                event.button_code(),
+                event.state() == ButtonState::Pressed,
+                event.time_msec(),
+            ) {
+                return;
+            }
             match event.state() {
                 ButtonState::Pressed => {
                     state.pressed_buttons.insert(event.button_code());
@@ -385,6 +399,9 @@ fn process_input(event: InputEvent<LibinputInputBackend>, state: &mut Villain) {
             pointer.frame(state);
         }
         InputEvent::PointerAxis { event } => {
+            if state.screenshot.intercepting_pointer() {
+                return;
+            }
             let mut frame = AxisFrame::new(event.time_msec()).source(event.source());
             for axis in [Axis::Horizontal, Axis::Vertical] {
                 let amount = event

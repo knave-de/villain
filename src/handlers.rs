@@ -137,7 +137,7 @@ impl ShmHandler for Villain {
 }
 
 impl SelectionHandler for Villain {
-    type SelectionUserData = ();
+    type SelectionUserData = crate::screenshot::SelectionPayload;
 
     fn new_selection(
         &mut self,
@@ -160,13 +160,22 @@ impl SelectionHandler for Villain {
         mime_type: String,
         fd: OwnedFd,
         _seat: Seat<Self>,
-        _user_data: &Self::SelectionUserData,
+        user_data: &Self::SelectionUserData,
     ) {
-        let Some(xwm) = self.xwm.as_mut() else {
-            return;
-        };
-        if let Err(error) = xwm.send_selection(selection, mime_type, fd, self.loop_handle.clone()) {
-            tracing::warn!(%error, ?selection, "could not transfer XWayland selection");
+        match user_data {
+            crate::screenshot::SelectionPayload::Png(_) => {
+                crate::screenshot::send_selection(self, &mime_type, fd, user_data);
+            }
+            crate::screenshot::SelectionPayload::ForwardToXwayland => {
+                let Some(xwm) = self.xwm.as_mut() else {
+                    return;
+                };
+                if let Err(error) =
+                    xwm.send_selection(selection, mime_type, fd, self.loop_handle.clone())
+                {
+                    tracing::warn!(%error, ?selection, "could not transfer XWayland selection");
+                }
+            }
         }
     }
 }

@@ -49,6 +49,7 @@ pub struct Villain {
     pub(crate) appearance_renderer: crate::appearance::render::EffectsRenderer,
 
     pub(crate) capture: crate::capture::CaptureState,
+    pub(crate) screenshot: crate::screenshot::ScreenshotState,
     pub(crate) foreign_toplevel_state:
         smithay::wayland::foreign_toplevel_list::ForeignToplevelListState,
     pub tty: Option<crate::tty::Tty>,
@@ -155,6 +156,7 @@ impl Villain {
             appearance_renderer: Default::default(),
 
             capture: crate::capture::CaptureState::default(),
+            screenshot: crate::screenshot::ScreenshotState::default(),
             tty: None,
             winit: None,
             dmabuf_state: smithay::wayland::dmabuf::DmabufState::new(),

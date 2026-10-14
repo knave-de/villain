@@ -26,6 +26,10 @@ pub enum Dispatch {
     Quit,
     ToggleOverview,
     SetOverviewVisible(bool),
+    Screenshot {
+        mode: crate::screenshot::ScreenshotMode,
+        clipboard: bool,
+    },
 }
 
 impl From<DesktopCommand> for Dispatch {
@@ -60,6 +64,7 @@ pub enum DispatchError {
     MinimizedWindow(WindowId),
     EmptyCommand,
     Spawn(io::Error),
+    Screenshot(String),
 }
 
 impl fmt::Display for DispatchError {
@@ -81,6 +86,7 @@ impl fmt::Display for DispatchError {
             }
             Self::EmptyCommand => write!(formatter, "spawn command is empty"),
             Self::Spawn(error) => write!(formatter, "could not spawn command: {error}"),
+            Self::Screenshot(error) => write!(formatter, "screenshot failed: {error}"),
         }
     }
 }
@@ -184,6 +190,9 @@ impl Villain {
             Dispatch::SetOverviewVisible(visible) => {
                 self.set_overview_visible(visible);
                 Ok(())
+            }
+            Dispatch::Screenshot { mode, clipboard } => {
+                crate::screenshot::begin(self, mode, clipboard).map_err(DispatchError::Screenshot)
             }
         }
     }
