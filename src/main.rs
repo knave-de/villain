@@ -72,7 +72,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     tracing::info!(socket = ?state.socket_name, "Villain is ready");
+    if direct {
+        tracing::info!("submitting initial direct TTY frame");
+    }
     state.render_if_needed();
+    if direct {
+        tracing::info!("initial direct TTY frame request completed");
+    }
     event_loop.run(None, &mut state, |state| {
         state.reap_children();
         state.space.refresh();

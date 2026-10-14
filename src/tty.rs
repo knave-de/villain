@@ -49,20 +49,25 @@ pub fn init(
     event_loop: &mut EventLoop<Villain>,
     state: &mut Villain,
 ) -> Result<(), Box<dyn Error>> {
+    tracing::info!("acquiring Linux seat for direct TTY backend");
     let (mut session, notifier) = LibSeatSession::new().map_err(|error| format!("Cannot acquire Linux seat: {error}. Run from a logged-in local TTY with logind or seatd available."))?;
     let seat = session.seat();
     if !session.is_active() {
         return Err("Linux seat is not active; run from the active local TTY".into());
     }
+    tracing::info!("Linux seat acquired and active");
+    tracing::info!("selecting DRM device for direct TTY backend");
     let path = match std::env::var_os("VILLAIN_DRM_DEVICE") {
         Some(path) => PathBuf::from(path),
         None => primary_gpu(&seat)?
             .or_else(|| all_gpus(&seat).ok()?.into_iter().next())
             .ok_or("No DRM GPU found on this seat")?,
     };
+    tracing::info!(gpu = %path.display(), "opening DRM device through Linux seat");
     let fd = session.open(&path, OFlags::RDWR | OFlags::CLOEXEC | OFlags::NONBLOCK)?;
     let fd = DrmDeviceFd::new(DeviceFd::from(fd));
     let device_id = fd.dev_id()?;
+    tracing::info!(gpu = %path.display(), "initializing DRM device and querying connectors");
     let (mut drm, drm_notifier) = DrmDevice::new(fd.clone(), false)?;
     let resources = drm.resource_handles()?;
     let mut selected = None;
@@ -92,11 +97,20 @@ pub fn init(
     }
     let (surface, mode, connector) = selected
         .ok_or("No connected display with a usable CRTC; connect a monitor before starting")?;
+    tracing::info!(
+        gpu = %path.display(),
+        connector = ?connector.interface(),
+        mode = ?mode.size(),
+        "selected direct display mode"
+    );
+    tracing::info!(gpu = %path.display(), "initializing GBM device");
     let gbm = GbmDevice::new(fd)?;
     // EGL retains the cloned GBM native display. All rendering stays on the
     // event-loop thread, which owns the context for its complete lifetime.
+    tracing::info!(gpu = %path.display(), "initializing EGL display and context");
     let egl = unsafe { EGLDisplay::new(gbm.clone())? };
     let context = EGLContext::new(&egl)?;
+    tracing::info!(gpu = %path.display(), "initializing GLES renderer");
     let renderer = unsafe { GlesRenderer::new(context)? };
     // Advertise GPU-buffer import to EGL clients such as Kitty.
     use smithay::{backend::renderer::ImportDma, wayland::dmabuf::DmabufFeedbackBuilder};
@@ -111,6 +125,7 @@ pub fn init(
         .copied()
         .collect::<Vec<_>>();
     let allocator = GbmAllocator::new(gbm, GbmBufferFlags::RENDERING | GbmBufferFlags::SCANOUT);
+    tracing::info!(gpu = %path.display(), "allocating direct display buffers");
     let surface = GbmBufferedSurface::new(
         surface,
         allocator,
@@ -157,6 +172,7 @@ pub fn init(
 
     let mut input =
         Libinput::new_with_udev::<LibinputSessionInterface<LibSeatSession>>(session.into());
+    tracing::info!("assigning libinput to the active Linux seat");
     input
         .udev_assign_seat(&seat)
         .map_err(|_| "libinput could not assign the seat")?;
@@ -246,6 +262,7 @@ pub fn init(
                 tracing::info!("TTY session resumed");
             }
         })?;
+    tracing::info!("DRM, renderer, and input sources registered");
     tracing::info!(gpu = %path.display(), ?size, "TTY backend ready; Ctrl+Alt+Backspace exits, Ctrl+Alt+F1–F12 switches VT");
     Ok(())
 }
