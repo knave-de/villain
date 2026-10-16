@@ -64,7 +64,12 @@ pub fn elements(
         // pane-local, then the completed element moves to its output position.
         let crop = Rectangle::from_size((width, height).into());
         let mut effects = std::mem::take(&mut state.appearance_renderer);
-        let windows = effects.scene(state, renderer, pane.workspace.0 as usize - 1, false);
+        let windows = effects.scene(
+            state,
+            renderer,
+            pane.workspace.0 as usize - 1,
+            crate::appearance::render::SceneLayers::Wallpaper,
+        );
         state.appearance_renderer = effects;
         let windows = windows?;
         result.extend(
@@ -84,7 +89,12 @@ pub fn elements(
         );
     }
     let mut effects = std::mem::take(&mut state.appearance_renderer);
-    let scene = effects.scene(state, renderer, state.active_workspace, true);
+    let scene = effects.scene(
+        state,
+        renderer,
+        state.active_workspace,
+        crate::appearance::render::SceneLayers::All,
+    );
     state.appearance_renderer = effects;
     result.extend(scene?.into_iter().map(OverviewRenderElement::Scene));
     Ok(result)

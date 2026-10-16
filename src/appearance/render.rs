@@ -75,7 +75,7 @@ type SourceKey = (
 #[derive(PartialEq)]
 struct SceneKey {
     workspace: usize,
-    layers: bool,
+    layers: SceneLayers,
     size: Size<i32, Logical>,
     appearance: WindowAppearance,
     sources: Vec<SourceKey>,
@@ -90,6 +90,20 @@ pub(crate) struct EffectsRenderer {
     programs: Option<(GlesPixelProgram, GlesTexProgram)>,
     scenes: VecDeque<CachedScene>,
 }
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) enum SceneLayers {
+    None,
+    Wallpaper,
+    All,
+}
+impl SceneLayers {
+    fn includes(self, layer: Layer, namespace: &str) -> bool {
+        self == Self::All
+            || (self == Self::Wallpaper
+                && layer == Layer::Background
+                && namespace == "knave-shell-wallpaper")
+    }
+}
 const MAX_PIXELS: i64 = 36 * 1024 * 1024;
 
 impl EffectsRenderer {
@@ -101,14 +115,14 @@ impl EffectsRenderer {
         state: &Villain,
         renderer: &mut GlesRenderer,
         workspace: usize,
-        layers: bool,
+        layers: SceneLayers,
     ) -> Result<Vec<EffectElement>, EffectError> {
         let size = state.output_size;
         let focused = state.keyboard.current_focus();
         let windows: Vec<_> = state
             .workspace_layout(workspace)
             .into_iter()
-            .filter(|entry| entry.5)
+            .filter(|entry| entry.5 && !(layers == SceneLayers::All && state.overview_visible))
             .collect();
         let mut key = SceneKey {
             workspace,
@@ -120,11 +134,13 @@ impl EffectsRenderer {
         };
         let mut lower = Vec::<EffectElement>::new();
         let mut upper = Vec::<EffectElement>::new();
-        if layers {
+        {
             for output in state.space.outputs() {
                 let map = layer_map_for_output(output);
                 for layer in map.layers() {
-                    if !state.layer_surface_visible(layer.wl_surface()) {
+                    if !layers.includes(layer.layer(), layer.namespace())
+                        || !state.layer_surface_visible(layer.wl_surface())
+                    {
                         continue;
                     }
                     let Some(geometry) = map.layer_geometry(layer) else {
@@ -163,7 +179,7 @@ impl EffectsRenderer {
         }
         // Include override-redirect X11 surfaces without adding decorations.
         let mut unmanaged = Vec::new();
-        if layers {
+        if layers == SceneLayers::All && !state.overview_visible {
             for window in state.space.elements() {
                 if windows.iter().any(|entry| entry.0 == *window) {
                     continue;

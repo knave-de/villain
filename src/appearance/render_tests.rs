@@ -154,3 +154,22 @@ fn gpu_pixels_prove_borders_rounding_opacity_directional_shadows_and_blur() {
         "blur must not spread without bound"
     );
 }
+
+#[test]
+fn overview_wallpaper_selection_keeps_capture_and_other_shell_layers_excluded() {
+    for layer in [Layer::Background, Layer::Bottom, Layer::Top, Layer::Overlay] {
+        for namespace in [
+            "knave-shell-wallpaper",
+            "knave-shell-bar",
+            "knave-shell-overview",
+            "other",
+        ] {
+            assert!(!SceneLayers::None.includes(layer, namespace));
+            assert!(SceneLayers::All.includes(layer, namespace));
+            assert_eq!(
+                SceneLayers::Wallpaper.includes(layer, namespace),
+                layer == Layer::Background && namespace == "knave-shell-wallpaper"
+            );
+        }
+    }
+}

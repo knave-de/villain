@@ -553,7 +553,12 @@ fn render_with(
         }
         CaptureSource::Workspaces { .. } => {
             let mut effects = std::mem::take(&mut state.appearance_renderer);
-            let scene = effects.scene(state, renderer, state.active_workspace, false);
+            let scene = effects.scene(
+                state,
+                renderer,
+                state.active_workspace,
+                crate::appearance::render::SceneLayers::None,
+            );
             state.appearance_renderer = effects;
             let mut elements: Vec<_> = cursors
                 .into_iter()

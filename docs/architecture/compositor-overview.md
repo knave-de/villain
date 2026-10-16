@@ -26,3 +26,13 @@ Update the three packages together.
 The selected hardware output currently has scale 1. Live nested and direct-TTY
 rendering, damage, input, frame pacing, CPU, memory, and wakeups need measurements
 on the target session before performance is considered verified.
+
+Overview panes and PNG previews include only the background-layer surface named
+`knave-shell-wallpaper`, beneath workspace windows. Other shell layers remain
+excluded, and workspace-only screen sharing still excludes every shell layer.
+The scene cache distinguishes desktop, wallpaper preview and capture selection.
+During Overview the full-output scene omits ordinary and unmanaged windows;
+windows remain visible in their workspace panes. The shell uses transparent
+clearing and a black translucent backdrop so wallpaper remains visible around
+the cards, including while searching. No image reload, worker or timer is added.
+Deploy the matching Shell and Villain builds together; rollback restores both.
