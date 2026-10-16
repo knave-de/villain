@@ -96,6 +96,11 @@ fn screenshot_elements(
     cursor: Vec<CursorRenderElement>,
     background: &smithay::backend::renderer::element::memory::MemoryRenderBuffer,
 ) -> Result<Vec<OverviewRenderElement>, crate::appearance::render::EffectError> {
+    // Render elements are front-to-back; keep the frozen image behind the tint and cursor.
+    let mut result: Vec<_> = cursor
+        .into_iter()
+        .map(OverviewRenderElement::Cursor)
+        .collect();
     let image = MemoryRenderBufferRenderElement::from_buffer(
         renderer,
         (0.0, 0.0),
@@ -106,7 +111,6 @@ fn screenshot_elements(
         Kind::Unspecified,
     )
     .map_err(crate::appearance::render::EffectError::Renderer)?;
-    let mut result = vec![OverviewRenderElement::Screenshot(image)];
     let size = state
         .screenshot
         .frame_size()
@@ -177,7 +181,7 @@ fn screenshot_elements(
             result.push(OverviewRenderElement::ScreenshotOverlay(element));
         }
     }
-    result.extend(cursor.into_iter().map(OverviewRenderElement::Cursor));
+    result.push(OverviewRenderElement::Screenshot(image));
     Ok(result)
 }
 
