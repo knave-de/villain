@@ -5,13 +5,13 @@ compatibility, or lifecycle code:
 
 1. identify every affected surface, client, shell, session, and command;
 2. inspect both sides of every protocol and every focus/input transition;
-3. classify the change and record configuration, version, and rollback impact;
+3. classify the change and record package, configuration, and rollback impact;
 4. test normal, failure, shutdown, and stale-runtime-file paths; and
 5. distinguish compiled/unit-tested behavior from live Wayland, GPU, VT, and
    installed-binary verification.
 
-Cross-repository changes must update the linked Knave/shell consumers and
-preserve a compatibility path until the coordinated replacement is deployed.
+Cross-repository changes update every linked consumer together. Do not keep
+obsolete API compatibility branches for unreleased package combinations.
 
 If the change adds watchers, timers, subscriptions, background work, caches,
 buffers, or parallelism, also record idle behavior, resource bounds,

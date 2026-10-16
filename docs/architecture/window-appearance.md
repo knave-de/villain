@@ -1,9 +1,9 @@
 # Window appearance implementation
 
 Knave owns `[compositor.appearance]` in its canonical config. Villain consumes
-`knave-config` at `3ef4a82a2dd173999f0500515f69b79fc9c32b88`; desktop API remains
-pinned at `6b86b3c52d8ac2093d3a2d421735c1f35b06cb9a`. The configuration revision is published on Knave master. Locked builds resolve
-the merged revision without a machine-specific Cargo patch.
+`knave-config` at `3ef4a82a2dd173999f0500515f69b79fc9c32b88`. The configuration
+revision is published on Knave master. Locked builds resolve the merged revision
+without a machine-specific Cargo patch.
 
 Configure `gaps.outer` and `gaps.inner` using top/right/bottom/left logical pixels.
 Adjacent tiles add their inner-edge contributions. Outer gaps follow panel
@@ -52,8 +52,8 @@ allocations. Direct-TTY and long-running GPU performance require separate checks
 Roll out the Knave config commit first, then this matching Villain build; restart
 the compositor once. Subsequent edits use `knave config check` and `knavectl reload`.
 Rollback restores the old Villain binary first; appearance tables may remain as
-unknown data preserved by Knave. Schema 2, desktop/shell protocol versions, binaries
-and library package versions remain unchanged. No config data or bindings are deleted.
+unknown data preserved by Knave. Schema 2 and package versions remain unchanged.
+No config data or bindings are deleted.
 
 ## Verification on 2026-09-30
 
