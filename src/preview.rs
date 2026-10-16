@@ -106,7 +106,7 @@ fn render(
             &mut framebuffer,
             0,
             &elements,
-            [0.035, 0.047, 0.063, 1.0],
+            [0.0, 0.0, 0.0, 1.0],
         )
         .map_err(|error| format!("could not render preview: {error:?}"))?;
     result

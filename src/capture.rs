@@ -583,11 +583,7 @@ fn render_with(
             &mut framebuffer,
             0,
             &elements,
-            if matches!(source, CaptureSource::Window(_)) {
-                [0.0, 0.0, 0.0, 1.0]
-            } else {
-                [0.08, 0.05, 0.12, 1.0]
-            },
+            [0.0, 0.0, 0.0, 1.0],
         )
         .map_err(|e| format!("{e:?}"))?;
     result.sync.wait().map_err(|e| e.to_string())?;

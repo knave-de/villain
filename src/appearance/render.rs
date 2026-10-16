@@ -234,11 +234,7 @@ impl EffectsRenderer {
             .map_err(EffectError::Renderer)?;
         let (shape_program, texture_program) = self.programs.as_ref().expect("programs compiled");
         let appearance = &state.config.appearance;
-        let background = if layers {
-            [0.08, 0.05, 0.12, 1.0]
-        } else {
-            [0.035, 0.047, 0.063, 1.0]
-        };
+        let background = [0.0, 0.0, 0.0, 1.0];
         let mut elements = lower;
         let mut live_pixels = 0_i64;
         for ((window, rect, fullscreen, maximized, tiled, _), original) in
