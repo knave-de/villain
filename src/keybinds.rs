@@ -52,6 +52,12 @@ impl KeybindRegistry {
             spec("MOD+CTRL+LEFT", "resize-master", &["-5"]),
             spec("MOD+CTRL+RIGHT", "resize-master", &["5"]),
             spec("MOD+CTRL+R", "reset-master", &[]),
+            spec("PRINT", "screenshot", &["region", "save"]),
+            spec("SHIFT+PRINT", "screenshot", &["output", "save"]),
+            spec("MOD+PRINT", "screenshot", &["window", "save"]),
+            spec("CTRL+PRINT", "screenshot", &["region", "clipboard"]),
+            spec("CTRL+SHIFT+PRINT", "screenshot", &["output", "clipboard"]),
+            spec("MOD+SHIFT+PRINT", "screenshot", &["window", "clipboard"]),
             spec("MOD+M", "minimize", &[]),
             spec("MOD+SHIFT+M", "restore-minimized", &[]),
             spec("MOD+LEFT", "previous-workspace", &[]),
@@ -224,6 +230,21 @@ fn parse_keys(value: &str, modkey: Modkey) -> Result<KeyCombination, String> {
 
 fn parse_dispatch(spec: &BindSpec) -> Result<Dispatch, String> {
     match spec.dispatch.as_str() {
+        "screenshot" if spec.args.len() == 2 => {
+            let mode = match spec.args[0].as_str() {
+                "region" => crate::screenshot::ScreenshotMode::Region,
+                "output" => crate::screenshot::ScreenshotMode::Output,
+                "window" => crate::screenshot::ScreenshotMode::Window,
+                _ => return Err("screenshot mode must be region, output, or window".into()),
+            };
+            let clipboard = match spec.args[1].as_str() {
+                "save" => false,
+                "clipboard" => true,
+                _ => return Err("screenshot destination must be save or clipboard".into()),
+            };
+            Ok(Dispatch::Screenshot { mode, clipboard })
+        }
+        "screenshot" => Err("screenshot requires a mode and destination".into()),
         "resize-master" if spec.args.len() == 1 => {
             let delta: i16 = spec.args[0]
                 .parse()
@@ -296,6 +317,19 @@ pub fn handle_keyboard_event<B: InputBackend>(
                 return FilterResult::Intercept(None);
             }
             if state.suppressed_keys.contains(&code) {
+                return FilterResult::Intercept(None);
+            }
+            if state.screenshot.selecting() {
+                if pressed {
+                    state.suppressed_keys.insert(code);
+                    if key
+                        .raw_syms()
+                        .iter()
+                        .any(|symbol| symbol.raw() == keysyms::KEY_Escape)
+                    {
+                        crate::screenshot::keyboard_key(state, keysyms::KEY_Escape, true);
+                    }
+                }
                 return FilterResult::Intercept(None);
             }
             if pressed

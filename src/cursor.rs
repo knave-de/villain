@@ -35,6 +35,7 @@ struct CursorFrame {
 pub struct CursorState {
     image: CursorImageStatus,
     split_override: bool,
+    screenshot_override: bool,
     image_since: Duration,
     theme: xcursor::CursorTheme,
     size: u32,
@@ -53,6 +54,7 @@ impl CursorState {
         Self {
             image: CursorImageStatus::default_named(),
             split_override: false,
+            screenshot_override: false,
             image_since: Duration::ZERO,
             theme: xcursor::CursorTheme::load(&theme_name),
             size,
@@ -65,8 +67,14 @@ impl CursorState {
         self.split_override = active;
     }
 
+    pub fn set_screenshot_override(&mut self, active: bool) {
+        self.screenshot_override = active;
+    }
+
     fn effective_image(&self) -> CursorImageStatus {
-        if self.split_override {
+        if self.screenshot_override {
+            CursorImageStatus::Named(CursorIcon::Crosshair)
+        } else if self.split_override {
             CursorImageStatus::Named(CursorIcon::ColResize)
         } else {
             self.image.clone()

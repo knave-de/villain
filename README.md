@@ -187,6 +187,27 @@ or while a maximized/fullscreen window covers the layout. Floating windows and
 individual stack dividers are unchanged. These are Villain keybinding actions,
 not new desktop IPC commands.
 
+## Screenshots
+
+Screenshot bindings capture Villain's composed output directly. Region capture
+freezes the current frame before selection starts; drag with the left button and
+press `Escape` to cancel. The compositor retains focus and intercepts selection
+input, so the frozen image keeps tooltips and other layer surfaces visible.
+
+| Shortcut | Action |
+| --- | --- |
+| `Print` | Drag a region and save it |
+| `Shift+Print` | Save the output |
+| `MOD+Print` | Save the focused window |
+| `Ctrl+Print` | Drag a region and copy PNG |
+| `Ctrl+Shift+Print` | Copy the output as PNG |
+| `MOD+Shift+Print` | Copy the focused window as PNG |
+
+Saved files go to `$XDG_PICTURES_DIR/Screenshots` or `~/Pictures/Screenshots`.
+Custom binding sets replace defaults; these actions use
+`dispatch = "screenshot"` with arguments `region|output|window` and
+`save|clipboard`.
+
 ## Window appearance
 
 Configure independent window gap edges, border widths and colors, corner radii,
