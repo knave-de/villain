@@ -3,8 +3,8 @@
 ## Decision and ownership
 
 Villain owns maximization, client protocol requests, layout and focus. Knave
-owns additive API 1.1 commands and window metadata. Shell presentation and its
-polling remain unchanged. No new timer, worker, subscription or persistent
+owns the shared commands and window metadata. Shell presentation and its
+subscription remain unchanged. No new timer, worker, subscription or persistent
 configuration is introduced; the additional runtime state is one optional
 window ID per workspace, one initial-focus flag per window, and bounded layout inspection.
 
@@ -34,21 +34,17 @@ fullscreen behavior.
 
 ## Contracts, rollout and rollback
 
-API 1.1 adds `maximize-focused`, `unmaximize-focused`, and
-`toggle-maximize-focused`; window summaries add default-false `maximized`.
+The shared contract includes `maximize-focused`, `unmaximize-focused`, and
+`toggle-maximize-focused`; window summaries include default-false `maximized`.
 The public flag records saved state even during fullscreen/minimization.
 Existing minimize/restore commands keep their behavior. The default `MOD+F`
 binding toggles maximization; custom bindings are never rewritten. Configuration
 schema and binary package versions are unchanged.
 
-Consumers: Villain, `knavectl`, and Shell's existing summary decoder. Old pinned
-Shell clients ignore the additive JSON field. Rebuilding a Rust consumer with
-the new API requires adding the field to summary literals and accounting for
-new command variants. Deploy the matching Knave API/client commit before the
-Villain dependency pin. Until that commit is published, local builds may use a
-Cargo patch pointing `knave-desktop-api` at the matching Knave checkout; do not
-commit that machine-specific override. Revert both feature commits to roll back;
-there is no persisted maximize state or migration to undo.
+Consumers: Villain, `knavectl`, and Shell's summary decoder. Update the Knave,
+Villain, and Shell packages together. Rebuilding Rust consumers requires adding
+the field to summary literals and accounting for command variants. There is no
+persisted maximize state or migration to undo.
 
 ## Verification
 

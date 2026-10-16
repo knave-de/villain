@@ -1,4 +1,4 @@
-//! JSON-lines server for Knave’s versioned desktop contract.
+//! JSON-lines server for Knave’s desktop contract.
 
 mod subscriptions;
 use subscriptions::{Subscriber, Subscriptions};
@@ -23,9 +23,8 @@ use std::{
 
 use base64::Engine;
 use knave_desktop_api::{
-    API_VERSION, DesktopError, DesktopErrorCode, DesktopQuery, DesktopRequest, DesktopResponse,
-    DesktopSnapshot, OverviewPane, ProtocolVersion, WorkspaceId, WorkspacePreview,
-    socket_path_for_display,
+    DesktopError, DesktopErrorCode, DesktopQuery, DesktopRequest, DesktopResponse, DesktopSnapshot,
+    OverviewPane, WorkspaceId, WorkspacePreview, socket_path_for_display,
 };
 use smithay::reexports::calloop::{
     EventLoop, Interest, LoopHandle, Mode, PostAction, RegistrationToken, channel, generic::Generic,
@@ -136,18 +135,8 @@ pub fn init(
             }
             {
                 let reply = match envelope.request {
-                    DesktopRequest::Subscribe { protocol } => {
-                        if protocol.major != API_VERSION.major
-                            || protocol.minor < 2
-                            || protocol.minor > API_VERSION.minor
-                        {
-                            Reply::Response(DesktopResponse::Error(DesktopError {
-                                code: DesktopErrorCode::IncompatibleVersion,
-                                message: "Snapshot subscriptions require desktop API 1.2 or newer"
-                                    .into(),
-                                retryable: false,
-                            }))
-                        } else if let Some(subscriber) = envelope.subscriber {
+                    DesktopRequest::Subscribe => {
+                        if let Some(subscriber) = envelope.subscriber {
                             state.publish_desktop_state();
                             state.ipc_server.subscriptions.subscribe(&subscriber);
                             Reply::Subscribed(state.ipc_server.subscriptions.frame())
@@ -260,7 +249,7 @@ fn serve_connection(
                 continue;
             }
         };
-        let subscription = if matches!(request, DesktopRequest::Subscribe { .. }) {
+        let subscription = if matches!(request, DesktopRequest::Subscribe) {
             match Subscriber::new() {
                 Ok(subscription) => Some(subscription),
                 Err(error) => {
@@ -439,7 +428,7 @@ impl Villain {
 
     fn handle_ipc(&mut self, request: DesktopRequest) -> DesktopResponse {
         match request {
-            DesktopRequest::Subscribe { .. } => {
+            DesktopRequest::Subscribe => {
                 invalid_request("Subscribe requires a dedicated transport".into())
             }
             DesktopRequest::SetOverviewPanes { panes } => self.set_overview_panes(panes),
@@ -484,7 +473,6 @@ impl Villain {
                     }),
                 },
                 DesktopQuery::Version => DesktopResponse::Version {
-                    protocol: ProtocolVersion { ..API_VERSION },
                     component: format!("villain {}", env!("CARGO_PKG_VERSION")),
                 },
             },

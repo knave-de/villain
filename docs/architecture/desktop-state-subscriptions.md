@@ -1,6 +1,6 @@
 # Desktop state subscriptions
 
-Villain implements Knave desktop API 1.2 `subscribe` on a dedicated connection.
+Villain implements Knave's `subscribe` request on a dedicated connection.
 The first response is a complete snapshot, registered atomically on the compositor
 event loop. Later snapshots replace prior state and may coalesce intermediate
 changes. Existing request/response clients are unaffected; no unsolicited frames
@@ -23,11 +23,9 @@ that client. Completion notifications reap workers and close control descriptors
 shutdown removes sources, closes all client sockets and joins workers. The
 compositor never waits for subscriber writes.
 
-Deploy the pinned Knave API revision, then this compositor, then the subscribing
-shell. API 1.0/1.1 query/action clients retain support. Roll back the shell before
-the server. No user configuration, socket path or permissions change occurs.
-See Knave's ADR 0002 for wire semantics and compatibility. Binary version stays
-unreleased 0.1.0; the public desktop API advances from 1.1 to 1.2.
+Knave, Villain, and Shell use the same request and snapshot shapes; update the
+three packages together. No user configuration, socket path, or permissions
+change occurs. See Knave's ADR 0002 for wire semantics.
 
 ## Measurement
 

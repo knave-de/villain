@@ -1,16 +1,6 @@
-# Villain versioning and compatibility
+# Package versions
 
-Villain independently versions:
-
-- the compositor binary and libraries;
-- private compositor implementation protocols; and
-- the compatibility range of the Knave desktop API it implements.
-
-Knave owns the public desktop API version. Villain pins a concrete Knave API
-revision, validates requests, and must not silently accept incompatible
-messages. Private protocol changes still require sender/receiver discovery,
-additive or breaking behavior, tests, and rollback.
-
-The public control client is knavectl, owned by Knave. villainctl is removed;
-new control commands are Knave desktop API changes, not Villain-local CLI
-features.
+Villain's Cargo package and binary versions identify its build. The Knave
+desktop contract has no separate API version or negotiation; Knave, Villain,
+Shell, and portal components update shared messages together. Wayland interface
+negotiation follows the respective protocol definitions.

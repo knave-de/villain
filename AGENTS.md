@@ -27,13 +27,12 @@ until the compositor event path has been inspected.
 
 ## Contracts and compatibility
 
-The public desktop contract is owned by Knave's knave-desktop-api crate.
-Villain is its versioned server implementation. knavectl is the public control
-client; villainctl and villain-ipc are removed.
+The desktop contract is owned by Knave's knave-desktop-api crate. knavectl is
+the public control client.
 
-Version and test changes to:
+Review and test changes to:
 
-- the pinned Knave API revision and protocol messages;
+- the pinned Knave package revision and shared desktop messages;
 - socket naming, permissions, and readiness behavior;
 - workspace and window IDs and fields;
 - focus and activation semantics;
@@ -43,8 +42,8 @@ Version and test changes to:
 - nested/direct backend selection;
 - environment and portal activation.
 
-For each change, find every sender and receiver, define compatibility or
-migration behavior, update tests, and document user-visible effects.
+For each shared change, find every sender and receiver, update them together,
+run coordinated package tests, and document user-visible effects.
 
 Villain must not create a second user-facing configuration store. It consumes
 validated projections from ~/.config/knave/config.toml and keeps source

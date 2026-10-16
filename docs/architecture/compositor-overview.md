@@ -1,7 +1,7 @@
 # Compositor-rendered overview panes
 
-Villain implements Knave desktop API 1.4 overview visibility and API 1.3
-`set_overview_panes`. Knave Session starts one hidden Overview shell process.
+Villain implements overview visibility and `set_overview_panes`. Knave Session
+starts one hidden Overview shell process.
 The default Super binding toggles the session-local `overview_visible` state;
 Escape and acknowledged shell actions set it false. The shell maps or unmaps
 its layer surface from the subscribed snapshot. Destroying the Overview surface
@@ -21,8 +21,8 @@ rounded card corners. The shell layer continues to own all input. Inactive
 workspace windows in visible panes receive paced frame callbacks; their commits
 request a repaint. This adds no capture, readback, PNG encode, or image cache.
 
-The request is additive. API 1.2 clients and the old PNG query still work with
-this compositor. Install Villain before a new shell; rollback the shell first.
+Knave, Villain, and Shell use the same visibility and pane message shapes.
+Update the three packages together.
 The selected hardware output currently has scale 1. Live nested and direct-TTY
 rendering, damage, input, frame pacing, CPU, memory, and wakeups need measurements
 on the target session before performance is considered verified.

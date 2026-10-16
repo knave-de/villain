@@ -48,7 +48,7 @@ repository because it is the public control CLI for the complete desktop.
 
 ## Knave desktop IPC
 
-Villain serves Knave's versioned JSON-lines desktop contract at:
+Villain serves Knave's JSON-lines desktop contract at:
 
     $XDG_RUNTIME_DIR/knave/desktop-$WAYLAND_DISPLAY.sock
 
@@ -67,9 +67,6 @@ Control commands are issued through knavectl:
     knavectl dispatch focus-window 1
     knavectl dispatch minimize
     knavectl dispatch exec kitty
-
-villainctl is removed. New commands belong to knavectl and are reviewed as
-Knave desktop API changes.
 
 ## Configuration
 
@@ -96,9 +93,9 @@ configuration instead.
 | Wayland compositor, focus, input, layout, and rendering | Villain |
 | Shell presentation and interaction | Knave Shell |
 
-Every change to a shared ID, IPC message, configuration key, or lifecycle
-path must inspect all consumers, version behavior, migration, rollback, and
-the direct/nested live-test coverage.
+Every change to a shared ID, IPC message, configuration key, or lifecycle path
+must inspect all consumers, update the coordinated packages, and include the
+relevant direct/nested live-test coverage.
 
 ## Documentation
 
@@ -141,8 +138,7 @@ keys = "MOD+F"
 dispatch = "toggle-maximize"
 ```
 
-These commands require desktop API 1.1. Existing Shell clients may remain on
-API 1.0. See [maximization policy](docs/architecture/maximization.md).
+See [maximization policy](docs/architecture/maximization.md).
 
 ## Master/stack resizing
 
