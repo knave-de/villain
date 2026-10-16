@@ -24,10 +24,12 @@ remains application-controlled.
 `views.tiled`, `views.floating`, and `views.maximized` gate gaps, borders, radius,
 shadows, opacity and blur independently. Tiled/floating switches default true;
 maximized switches default false. Numeric/effect defaults preserve prior visuals.
-Fullscreen always uses the entire output and bypasses every compositor effect,
-with no configurable override. Saved maximization and floating placement survive
-view transitions. Knave's `docs/architecture/window-appearance.md` contains the
-complete validated contract, defaults, bounds and TOML example.
+Fullscreen always uses the entire output and bypasses every compositor effect.
+Top-layer shell surfaces such as the status bar are hidden and excluded from
+input while fullscreen is active; overlay-layer surfaces remain available.
+There is no configurable override. Saved maximization and floating placement
+survive view transitions. Knave's `docs/architecture/window-appearance.md`
+contains the complete validated contract, defaults, bounds and TOML example.
 
 Reload validates before replacing config, cancels grabs, drops cached scenes and
 recomputes geometry. Keyboard focus requests repaint without requiring a client
