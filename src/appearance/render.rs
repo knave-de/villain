@@ -89,6 +89,7 @@ struct CachedScene {
 pub(crate) struct EffectsRenderer {
     programs: Option<(GlesPixelProgram, GlesTexProgram)>,
     scenes: VecDeque<CachedScene>,
+    panes: VecDeque<CachedPane>,
 }
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) enum SceneLayers {
@@ -104,11 +105,18 @@ impl SceneLayers {
                 && namespace == "knave-shell-wallpaper")
     }
 }
+struct CachedPane {
+    workspace: usize,
+    geometry: Geometry,
+    sources: Vec<SourceKey>,
+    texture: TextureBuffer<GlesTexture>,
+}
 const MAX_PIXELS: i64 = 36 * 1024 * 1024;
 
 impl EffectsRenderer {
     pub(crate) fn clear(&mut self) {
         self.scenes.clear();
+        self.panes.clear();
     }
     pub(crate) fn scene(
         &mut self,
@@ -138,7 +146,13 @@ impl EffectsRenderer {
             for output in state.space.outputs() {
                 let map = layer_map_for_output(output);
                 for layer in map.layers() {
-                    if !layers.includes(layer.layer(), layer.namespace())
+                    if (state.overview_visible
+                        && layers == SceneLayers::All
+                        && matches!(
+                            layer.namespace(),
+                            "knave-shell-overview" | "knave-shell-bar"
+                        ))
+                        || !layers.includes(layer.layer(), layer.namespace())
                         || !state.layer_surface_visible(layer.wl_surface())
                     {
                         continue;
@@ -463,6 +477,87 @@ impl EffectsRenderer {
         }
         self.scenes.push_back(CachedScene { key, texture });
         Ok(vec![EffectElement::Texture(element)])
+    }
+    pub(crate) fn overview_pane(
+        &mut self,
+        state: &Villain,
+        renderer: &mut GlesRenderer,
+        workspace: usize,
+        geometry: Geometry,
+    ) -> Result<EffectElement, EffectError> {
+        use smithay::backend::renderer::element::utils::{
+            ConstrainAlign, ConstrainScaleBehavior, constrain_render_elements,
+        };
+        let scene = self.scene(state, renderer, workspace, SceneLayers::Wallpaper)?;
+        let sources: Vec<_> = scene.iter().map(source_key).collect();
+        if let Some(index) = self.panes.iter().position(|p| {
+            p.workspace == workspace && p.geometry == geometry && p.sources == sources
+        }) {
+            let cached = self.panes.remove(index).expect("pane cache index");
+            let element = EffectElement::Texture(texture_element(
+                &cached.texture,
+                (geometry.loc.x, geometry.loc.y),
+                1.0,
+            ));
+            self.panes.push_back(cached);
+            return Ok(element);
+        }
+        let pixels = i64::from(geometry.size.w) * i64::from(geometry.size.h);
+        if pixels <= 0 || pixels > MAX_PIXELS {
+            return Err(EffectError::TargetTooLarge);
+        }
+        self.panes.retain(|p| p.workspace != workspace);
+        while self.panes.len() >= 3
+            || self
+                .panes
+                .iter()
+                .map(|p| i64::from(p.geometry.size.w) * i64::from(p.geometry.size.h))
+                .sum::<i64>()
+                + pixels
+                > MAX_PIXELS
+        {
+            self.panes.pop_front();
+        }
+        let elements: Vec<_> = constrain_render_elements(
+            scene,
+            (0, 0),
+            Rectangle::from_size((geometry.size.w, geometry.size.h).into()),
+            Rectangle::from_size((state.output_size.w, state.output_size.h).into()),
+            ConstrainScaleBehavior::Zoom,
+            ConstrainAlign::CENTER,
+            Scale::from(1.0),
+        )
+        .collect();
+        let texture = render_texture(renderer, geometry.size, &elements, [0.0, 0.0, 0.0, 1.0])?;
+        self.ensure_programs(renderer)
+            .map_err(EffectError::Renderer)?;
+        let radius = 22.0_f32
+            .min(geometry.size.w as f32 / 2.0)
+            .min(geometry.size.h as f32 / 2.0);
+        let element = filtered(
+            renderer,
+            texture,
+            &self.programs.as_ref().expect("compiled pane shader").1,
+            (0, 0).into(),
+            [radius; 4],
+            1.0,
+            (0.0, 0.0),
+            0.0,
+        );
+        let texture = render_texture(renderer, geometry.size, &[element], [0.0; 4])?;
+        let texture = TextureBuffer::from_texture(renderer, texture, 1, Transform::Normal, None);
+        let element = EffectElement::Texture(texture_element(
+            &texture,
+            (geometry.loc.x, geometry.loc.y),
+            1.0,
+        ));
+        self.panes.push_back(CachedPane {
+            workspace,
+            geometry,
+            sources,
+            texture,
+        });
+        Ok(element)
     }
     fn ensure_programs(&mut self, renderer: &mut GlesRenderer) -> Result<(), GlesError> {
         if self.programs.is_none() {

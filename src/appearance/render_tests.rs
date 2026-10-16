@@ -173,3 +173,32 @@ fn overview_wallpaper_selection_keeps_capture_and_other_shell_layers_excluded() 
         }
     }
 }
+
+#[test]
+fn overview_cover_fills_a_wide_card_instead_of_letterboxing() {
+    use smithay::backend::renderer::element::{
+        solid::SolidColorRenderElement,
+        utils::{ConstrainAlign, ConstrainScaleBehavior, constrain_render_elements},
+    };
+    let source = Rectangle::from_size((1280, 800).into());
+    let card = Rectangle::from_size((1036, 580).into());
+    let element = SolidColorRenderElement::new(
+        Id::new(),
+        source,
+        CommitCounter::default(),
+        [1.0; 4],
+        Kind::Unspecified,
+    );
+    let scaled: Vec<_> = constrain_render_elements(
+        vec![element],
+        (0, 0),
+        card,
+        source,
+        ConstrainScaleBehavior::Zoom,
+        ConstrainAlign::CENTER,
+        Scale::from(1.0),
+    )
+    .collect();
+    assert_eq!(scaled.len(), 1);
+    assert_eq!(scaled[0].geometry(Scale::from(1.0)), card);
+}
