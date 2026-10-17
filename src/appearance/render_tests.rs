@@ -154,3 +154,51 @@ fn gpu_pixels_prove_borders_rounding_opacity_directional_shadows_and_blur() {
         "blur must not spread without bound"
     );
 }
+
+#[test]
+fn overview_wallpaper_selection_keeps_capture_and_other_shell_layers_excluded() {
+    for layer in [Layer::Background, Layer::Bottom, Layer::Top, Layer::Overlay] {
+        for namespace in [
+            "knave-shell-wallpaper",
+            "knave-shell-bar",
+            "knave-shell-overview",
+            "other",
+        ] {
+            assert!(!SceneLayers::None.includes(layer, namespace));
+            assert!(SceneLayers::All.includes(layer, namespace));
+            assert_eq!(
+                SceneLayers::Wallpaper.includes(layer, namespace),
+                layer == Layer::Background && namespace == "knave-shell-wallpaper"
+            );
+        }
+    }
+}
+
+#[test]
+fn overview_cover_fills_a_wide_card_instead_of_letterboxing() {
+    use smithay::backend::renderer::element::{
+        solid::SolidColorRenderElement,
+        utils::{ConstrainAlign, ConstrainScaleBehavior, constrain_render_elements},
+    };
+    let source = Rectangle::from_size((1280, 800).into());
+    let card = Rectangle::from_size((1036, 580).into());
+    let element = SolidColorRenderElement::new(
+        Id::new(),
+        source,
+        CommitCounter::default(),
+        [1.0; 4],
+        Kind::Unspecified,
+    );
+    let scaled: Vec<_> = constrain_render_elements(
+        vec![element],
+        (0, 0),
+        card,
+        source,
+        ConstrainScaleBehavior::Zoom,
+        ConstrainAlign::CENTER,
+        Scale::from(1.0),
+    )
+    .collect();
+    assert_eq!(scaled.len(), 1);
+    assert_eq!(scaled[0].geometry(Scale::from(1.0)), card);
+}

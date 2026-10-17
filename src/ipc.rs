@@ -381,11 +381,11 @@ impl Villain {
             && !self
                 .shell_surfaces
                 .iter()
-                .any(|entry| entry.layer.namespace() == "knave-shell-overview" && entry.mapped)
+                .any(|entry| entry.layer.namespace() == "knave-shell-overview")
         {
             return DesktopResponse::Error(DesktopError {
                 code: DesktopErrorCode::Unavailable,
-                message: "overview shell surface is not mapped".into(),
+                message: "overview shell surface is not registered".into(),
                 retryable: true,
             });
         }
@@ -419,10 +419,8 @@ impl Villain {
                 "overview pane is outside the logical output or workspace range".into(),
             );
         }
-        if self.overview_panes != panes {
-            self.overview_panes = panes;
-            self.request_repaint();
-        }
+        // The next shell buffer commits its matching pane geometry atomically.
+        self.pending_overview_panes = Some(panes);
         DesktopResponse::Ok
     }
 

@@ -553,7 +553,12 @@ fn render_with(
         }
         CaptureSource::Workspaces { .. } => {
             let mut effects = std::mem::take(&mut state.appearance_renderer);
-            let scene = effects.scene(state, renderer, state.active_workspace, false);
+            let scene = effects.scene(
+                state,
+                renderer,
+                state.active_workspace,
+                crate::appearance::render::SceneLayers::None,
+            );
             state.appearance_renderer = effects;
             let mut elements: Vec<_> = cursors
                 .into_iter()
@@ -583,11 +588,7 @@ fn render_with(
             &mut framebuffer,
             0,
             &elements,
-            if matches!(source, CaptureSource::Window(_)) {
-                [0.0, 0.0, 0.0, 1.0]
-            } else {
-                [0.08, 0.05, 0.12, 1.0]
-            },
+            [0.0, 0.0, 0.0, 1.0],
         )
         .map_err(|e| format!("{e:?}"))?;
     result.sync.wait().map_err(|e| e.to_string())?;

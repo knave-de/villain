@@ -2,10 +2,6 @@
 
 use smithay::{
     backend::renderer::{
-        element::utils::{
-            ConstrainAlign, ConstrainScaleBehavior, CropRenderElement, Relocate,
-            RelocateRenderElement, RescaleRenderElement, constrain_render_elements,
-        },
         element::{
             Id, Kind, memory::MemoryRenderBufferRenderElement, solid::SolidColorRenderElement,
         },
@@ -17,16 +13,10 @@ use smithay::{
 
 use crate::{cursor::CursorRenderElement, state::Villain};
 
-type PaneElement = RelocateRenderElement<
-    CropRenderElement<
-        RelocateRenderElement<RescaleRenderElement<crate::appearance::render::EffectElement>>,
-    >,
->;
-
 smithay::backend::renderer::element::render_elements! {
     pub OverviewRenderElement<=GlesRenderer>;
     Cursor=CursorRenderElement,
-    Pane=PaneElement,
+    Overlay=smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement<GlesRenderer>,
     Window=crate::capture_window::WindowElement,
     Scene=crate::appearance::render::EffectElement,
     Screenshot=MemoryRenderBufferRenderElement<GlesRenderer>,
@@ -46,8 +36,43 @@ pub fn elements(
         .map(OverviewRenderElement::Cursor)
         .collect();
     let output = state.output_size;
-    let reference: Rectangle<i32, Physical> = Rectangle::from_size((output.w, output.h).into());
-    for pane in state.overview_panes.clone().iter().rev() {
+    let overview_mapped = state.overview_mapped();
+    if overview_mapped {
+        use smithay::{
+            backend::renderer::element::AsRenderElements, desktop::layer_map_for_output,
+        };
+        for output in state.space.outputs() {
+            let map = layer_map_for_output(output);
+            for layer in map
+                .layers()
+                .filter(|layer| layer.namespace() == "knave-shell-overview")
+            {
+                if !state.layer_surface_visible(layer.wl_surface()) {
+                    continue;
+                }
+                if let Some(geometry) = map.layer_geometry(layer) {
+                    let elements: Vec<
+                        smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement<
+                            GlesRenderer,
+                        >,
+                    > = layer.render_elements(
+                        renderer,
+                        geometry.loc.to_physical_precise_round(1.0),
+                        Scale::from(1.0),
+                        1.0,
+                    );
+                    result.extend(elements.into_iter().map(OverviewRenderElement::Overlay));
+                }
+            }
+        }
+    }
+    for pane in state
+        .overview_panes
+        .clone()
+        .iter()
+        .rev()
+        .filter(|_| overview_mapped)
+    {
         if state
             .workspace_preview_scene(pane.workspace.0 as usize - 1)
             .is_none()
@@ -60,31 +85,34 @@ pub fn elements(
         let Ok(height) = i32::try_from(pane.height) else {
             continue;
         };
-        // Smithay constrains in the source coordinate space; the crop must be
-        // pane-local, then the completed element moves to its output position.
-        let crop = Rectangle::from_size((width, height).into());
         let mut effects = std::mem::take(&mut state.appearance_renderer);
-        let windows = effects.scene(state, renderer, pane.workspace.0 as usize - 1, false);
-        state.appearance_renderer = effects;
-        let windows = windows?;
-        result.extend(
-            constrain_render_elements(
-                windows,
-                (0, 0),
-                crop,
-                reference,
-                ConstrainScaleBehavior::Fit,
-                ConstrainAlign::CENTER,
-                Scale::from(1.0),
-            )
-            .map(|element| {
-                RelocateRenderElement::from_element(element, (pane.x, pane.y), Relocate::Relative)
-            })
-            .map(OverviewRenderElement::Pane),
+        let element = effects.overview_pane(
+            state,
+            renderer,
+            pane.workspace.0 as usize - 1,
+            Rectangle::new((pane.x, pane.y).into(), (width, height).into()),
         );
+        state.appearance_renderer = effects;
+        result.push(OverviewRenderElement::Scene(element?));
+    }
+    if overview_mapped {
+        result.push(OverviewRenderElement::ScreenshotOverlay(
+            SolidColorRenderElement::new(
+                state.overview_backdrop_id.clone(),
+                Rectangle::from_size((output.w, output.h).into()),
+                CommitCounter::default(),
+                [0.0, 0.0, 0.0, 0.5],
+                Kind::Unspecified,
+            ),
+        ));
     }
     let mut effects = std::mem::take(&mut state.appearance_renderer);
-    let scene = effects.scene(state, renderer, state.active_workspace, true);
+    let scene = effects.scene(
+        state,
+        renderer,
+        state.active_workspace,
+        crate::appearance::render::SceneLayers::All,
+    );
     state.appearance_renderer = effects;
     result.extend(scene?.into_iter().map(OverviewRenderElement::Scene));
     Ok(result)

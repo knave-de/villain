@@ -1,6 +1,6 @@
 //! GLES effect elements and bounded offscreen targets.
 use super::*;
-pub(super) fn source_key(element: &WaylandSurfaceRenderElement<GlesRenderer>) -> SourceKey {
+pub(super) fn source_key(element: &impl Element) -> SourceKey {
     (
         element.id().clone(),
         element.current_commit(),

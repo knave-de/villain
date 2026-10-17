@@ -75,7 +75,7 @@ type SourceKey = (
 #[derive(PartialEq)]
 struct SceneKey {
     workspace: usize,
-    layers: bool,
+    layers: SceneLayers,
     size: Size<i32, Logical>,
     appearance: WindowAppearance,
     sources: Vec<SourceKey>,
@@ -89,26 +89,48 @@ struct CachedScene {
 pub(crate) struct EffectsRenderer {
     programs: Option<(GlesPixelProgram, GlesTexProgram)>,
     scenes: VecDeque<CachedScene>,
+    panes: VecDeque<CachedPane>,
+}
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) enum SceneLayers {
+    None,
+    Wallpaper,
+    All,
+}
+impl SceneLayers {
+    fn includes(self, layer: Layer, namespace: &str) -> bool {
+        self == Self::All
+            || (self == Self::Wallpaper
+                && layer == Layer::Background
+                && namespace == "knave-shell-wallpaper")
+    }
+}
+struct CachedPane {
+    workspace: usize,
+    geometry: Geometry,
+    sources: Vec<SourceKey>,
+    texture: TextureBuffer<GlesTexture>,
 }
 const MAX_PIXELS: i64 = 36 * 1024 * 1024;
 
 impl EffectsRenderer {
     pub(crate) fn clear(&mut self) {
         self.scenes.clear();
+        self.panes.clear();
     }
     pub(crate) fn scene(
         &mut self,
         state: &Villain,
         renderer: &mut GlesRenderer,
         workspace: usize,
-        layers: bool,
+        layers: SceneLayers,
     ) -> Result<Vec<EffectElement>, EffectError> {
         let size = state.output_size;
         let focused = state.keyboard.current_focus();
         let windows: Vec<_> = state
             .workspace_layout(workspace)
             .into_iter()
-            .filter(|entry| entry.5)
+            .filter(|entry| entry.5 && !(layers == SceneLayers::All && state.overview_mapped()))
             .collect();
         let mut key = SceneKey {
             workspace,
@@ -120,11 +142,19 @@ impl EffectsRenderer {
         };
         let mut lower = Vec::<EffectElement>::new();
         let mut upper = Vec::<EffectElement>::new();
-        if layers {
+        {
             for output in state.space.outputs() {
                 let map = layer_map_for_output(output);
                 for layer in map.layers() {
-                    if !state.layer_surface_visible(layer.wl_surface()) {
+                    if (state.overview_mapped()
+                        && layers == SceneLayers::All
+                        && matches!(
+                            layer.namespace(),
+                            "knave-shell-overview" | "knave-shell-bar"
+                        ))
+                        || !layers.includes(layer.layer(), layer.namespace())
+                        || !state.layer_surface_visible(layer.wl_surface())
+                    {
                         continue;
                     }
                     let Some(geometry) = map.layer_geometry(layer) else {
@@ -163,7 +193,7 @@ impl EffectsRenderer {
         }
         // Include override-redirect X11 surfaces without adding decorations.
         let mut unmanaged = Vec::new();
-        if layers {
+        if layers == SceneLayers::All && !state.overview_mapped() {
             for window in state.space.elements() {
                 if windows.iter().any(|entry| entry.0 == *window) {
                     continue;
@@ -234,11 +264,7 @@ impl EffectsRenderer {
             .map_err(EffectError::Renderer)?;
         let (shape_program, texture_program) = self.programs.as_ref().expect("programs compiled");
         let appearance = &state.config.appearance;
-        let background = if layers {
-            [0.08, 0.05, 0.12, 1.0]
-        } else {
-            [0.035, 0.047, 0.063, 1.0]
-        };
+        let background = [0.0, 0.0, 0.0, 1.0];
         let mut elements = lower;
         let mut live_pixels = 0_i64;
         for ((window, rect, fullscreen, maximized, tiled, _), original) in
@@ -451,6 +477,88 @@ impl EffectsRenderer {
         }
         self.scenes.push_back(CachedScene { key, texture });
         Ok(vec![EffectElement::Texture(element)])
+    }
+    pub(crate) fn overview_pane(
+        &mut self,
+        state: &Villain,
+        renderer: &mut GlesRenderer,
+        workspace: usize,
+        geometry: Geometry,
+    ) -> Result<EffectElement, EffectError> {
+        use smithay::backend::renderer::element::utils::{
+            ConstrainAlign, ConstrainScaleBehavior, constrain_render_elements,
+        };
+        let scene = self.scene(state, renderer, workspace, SceneLayers::Wallpaper)?;
+        let sources: Vec<_> = scene.iter().map(source_key).collect();
+        if let Some(index) = self.panes.iter().position(|p| {
+            p.workspace == workspace && p.geometry.size == geometry.size && p.sources == sources
+        }) {
+            let cached = self.panes.remove(index).expect("pane cache index");
+            let element = EffectElement::Texture(texture_element(
+                &cached.texture,
+                (geometry.loc.x, geometry.loc.y),
+                1.0,
+            ));
+            self.panes.push_back(cached);
+            return Ok(element);
+        }
+        let pixels = i64::from(geometry.size.w) * i64::from(geometry.size.h);
+        if pixels <= 0 || pixels > MAX_PIXELS {
+            return Err(EffectError::TargetTooLarge);
+        }
+        self.panes
+            .retain(|p| p.workspace != workspace || p.geometry.size != geometry.size);
+        while self.panes.len() >= 6
+            || self
+                .panes
+                .iter()
+                .map(|p| i64::from(p.geometry.size.w) * i64::from(p.geometry.size.h))
+                .sum::<i64>()
+                + pixels
+                > MAX_PIXELS
+        {
+            self.panes.pop_front();
+        }
+        let elements: Vec<_> = constrain_render_elements(
+            scene,
+            (0, 0),
+            Rectangle::from_size((geometry.size.w, geometry.size.h).into()),
+            Rectangle::from_size((state.output_size.w, state.output_size.h).into()),
+            ConstrainScaleBehavior::Zoom,
+            ConstrainAlign::CENTER,
+            Scale::from(1.0),
+        )
+        .collect();
+        let texture = render_texture(renderer, geometry.size, &elements, [0.0, 0.0, 0.0, 1.0])?;
+        self.ensure_programs(renderer)
+            .map_err(EffectError::Renderer)?;
+        let radius = 22.0_f32
+            .min(geometry.size.w as f32 / 2.0)
+            .min(geometry.size.h as f32 / 2.0);
+        let element = filtered(
+            renderer,
+            texture,
+            &self.programs.as_ref().expect("compiled pane shader").1,
+            (0, 0).into(),
+            [radius; 4],
+            1.0,
+            (0.0, 0.0),
+            0.0,
+        );
+        let texture = render_texture(renderer, geometry.size, &[element], [0.0; 4])?;
+        let texture = TextureBuffer::from_texture(renderer, texture, 1, Transform::Normal, None);
+        let element = EffectElement::Texture(texture_element(
+            &texture,
+            (geometry.loc.x, geometry.loc.y),
+            1.0,
+        ));
+        self.panes.push_back(CachedPane {
+            workspace,
+            geometry,
+            sources,
+            texture,
+        });
+        Ok(element)
     }
     fn ensure_programs(&mut self, renderer: &mut GlesRenderer) -> Result<(), GlesError> {
         if self.programs.is_none() {

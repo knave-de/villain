@@ -43,14 +43,24 @@ pub fn capture(
     let mut effects = std::mem::take(&mut state.appearance_renderer);
     let result = if let Some(mut tty) = state.tty.take() {
         let result = effects
-            .scene(state, &mut tty.renderer, index, false)
+            .scene(
+                state,
+                &mut tty.renderer,
+                index,
+                crate::appearance::render::SceneLayers::Wallpaper,
+            )
             .map_err(|error| error.to_string())
             .and_then(|elements| render(&mut tty.renderer, elements, output_size, width, height));
         state.tty = Some(tty);
         result
     } else if let Some(mut winit) = state.winit.take() {
         let result = effects
-            .scene(state, winit.renderer(), index, false)
+            .scene(
+                state,
+                winit.renderer(),
+                index,
+                crate::appearance::render::SceneLayers::Wallpaper,
+            )
             .map_err(|error| error.to_string())
             .and_then(|elements| render(winit.renderer(), elements, output_size, width, height));
         state.winit = Some(winit);
@@ -106,7 +116,7 @@ fn render(
             &mut framebuffer,
             0,
             &elements,
-            [0.035, 0.047, 0.063, 1.0],
+            [0.0, 0.0, 0.0, 1.0],
         )
         .map_err(|error| format!("could not render preview: {error:?}"))?;
     result

@@ -287,7 +287,7 @@ impl Tty {
             &mut framebuffer,
             usize::from(age),
             &elements,
-            [0.08, 0.05, 0.12, 1.0],
+            [0.0, 0.0, 0.0, 1.0],
         )?;
         let sync = result.sync.clone();
         let damage = result.damage.cloned();

@@ -499,12 +499,30 @@ fn layer_lifecycle_focus_and_workspace_independence() {
             overview_layer.set_size(800, 40);
             overview.commit();
             settle(&mut queue, &mut client);
-            inspect(&sender, |s| assert!(s.overview_visible));
+            inspect(&sender, |s| {
+                assert!(s.overview_visible);
+                assert!(!s.overview_mapped());
+                assert!(s.overview_panes.is_empty());
+                s.pending_overview_panes = Some(vec![knave_desktop_api::OverviewPane {
+                    workspace: knave_desktop_api::WorkspaceId(1),
+                    x: 10,
+                    y: 10,
+                    width: 100,
+                    height: 60,
+                }]);
+                assert!(
+                    s.overview_panes.is_empty(),
+                    "staged panes must not appear before the shell buffer"
+                );
+            });
             overview.attach(Some(&buffer), 0, 0);
             overview.commit();
             settle(&mut queue, &mut client);
             inspect(&sender, move |s| {
                 assert!(s.shell_surfaces[1].mapped);
+                assert!(s.overview_mapped());
+                assert_eq!(s.overview_panes.len(), 1);
+                assert!(s.pending_overview_panes.is_none());
                 if late_hide {
                     s.dispatch(crate::dispatch::Dispatch::SetOverviewVisible(false))
                         .unwrap();
@@ -519,6 +537,9 @@ fn layer_lifecycle_focus_and_workspace_independence() {
                 assert!(!s.shell_surfaces[1].mapped);
                 assert_eq!(s.overview_visible, late_hide);
                 assert!(!s.shell_surfaces[1].hide_pending);
+                assert!(!s.overview_mapped());
+                assert!(s.overview_panes.is_empty());
+                assert!(s.pending_overview_panes.is_none());
                 s.publish_desktop_state();
             });
         }
