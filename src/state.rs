@@ -74,6 +74,7 @@ pub struct Villain {
     pub shell_surfaces: Vec<crate::layer_shell::ShellSurface>,
     pub overview_backdrop_id: smithay::backend::renderer::element::Id,
     pub overview_panes: Vec<knave_desktop_api::OverviewPane>,
+    pub pending_overview_panes: Option<Vec<knave_desktop_api::OverviewPane>>,
     pub overview_visible: bool,
     pub popups: smithay::desktop::PopupManager,
     pub xwayland_shell_state: XWaylandShellState,
@@ -176,6 +177,7 @@ impl Villain {
             shell_surfaces: Vec::new(),
             overview_backdrop_id: smithay::backend::renderer::element::Id::new(),
             overview_panes: Vec::new(),
+            pending_overview_panes: None,
             overview_visible: false,
             popups: Default::default(),
             // Advertise only policy that Villain currently implements. Close

@@ -57,6 +57,7 @@ impl WlrLayerShellHandler for Villain {
         self.dismiss_layer_popups(surface.wl_surface());
         if was_overview {
             self.overview_panes.clear();
+            self.pending_overview_panes = None;
             self.overview_visible = false;
             self.desktop_state_dirty = true;
             self.request_repaint();
@@ -116,8 +117,15 @@ impl Villain {
             }
         }
         entry.mapped = mapped;
+        if mapped
+            && entry.layer.namespace() == "knave-shell-overview"
+            && let Some(panes) = self.pending_overview_panes.take()
+        {
+            self.overview_panes = panes;
+        }
         if !mapped && entry.layer.namespace() == "knave-shell-overview" {
             self.overview_panes.clear();
+            self.pending_overview_panes = None;
             // A late unmap can acknowledge an earlier hide after Super reopened it.
             let expected_hide = std::mem::take(&mut entry.hide_pending);
             if was_mapped && !expected_hide && self.overview_visible {
@@ -179,6 +187,12 @@ impl Villain {
         area.size.w = area.size.w.max(1);
         area.size.h = area.size.h.max(1);
         area
+    }
+
+    pub(crate) fn overview_mapped(&self) -> bool {
+        self.shell_surfaces
+            .iter()
+            .any(|entry| entry.mapped && entry.layer.namespace() == "knave-shell-overview")
     }
 
     pub fn layer_surface_visible(&self, surface: &WlSurface) -> bool {

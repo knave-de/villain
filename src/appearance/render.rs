@@ -130,7 +130,7 @@ impl EffectsRenderer {
         let windows: Vec<_> = state
             .workspace_layout(workspace)
             .into_iter()
-            .filter(|entry| entry.5 && !(layers == SceneLayers::All && state.overview_visible))
+            .filter(|entry| entry.5 && !(layers == SceneLayers::All && state.overview_mapped()))
             .collect();
         let mut key = SceneKey {
             workspace,
@@ -146,7 +146,7 @@ impl EffectsRenderer {
             for output in state.space.outputs() {
                 let map = layer_map_for_output(output);
                 for layer in map.layers() {
-                    if (state.overview_visible
+                    if (state.overview_mapped()
                         && layers == SceneLayers::All
                         && matches!(
                             layer.namespace(),
@@ -193,7 +193,7 @@ impl EffectsRenderer {
         }
         // Include override-redirect X11 surfaces without adding decorations.
         let mut unmanaged = Vec::new();
-        if layers == SceneLayers::All && !state.overview_visible {
+        if layers == SceneLayers::All && !state.overview_mapped() {
             for window in state.space.elements() {
                 if windows.iter().any(|entry| entry.0 == *window) {
                     continue;
@@ -491,7 +491,7 @@ impl EffectsRenderer {
         let scene = self.scene(state, renderer, workspace, SceneLayers::Wallpaper)?;
         let sources: Vec<_> = scene.iter().map(source_key).collect();
         if let Some(index) = self.panes.iter().position(|p| {
-            p.workspace == workspace && p.geometry == geometry && p.sources == sources
+            p.workspace == workspace && p.geometry.size == geometry.size && p.sources == sources
         }) {
             let cached = self.panes.remove(index).expect("pane cache index");
             let element = EffectElement::Texture(texture_element(
@@ -506,8 +506,9 @@ impl EffectsRenderer {
         if pixels <= 0 || pixels > MAX_PIXELS {
             return Err(EffectError::TargetTooLarge);
         }
-        self.panes.retain(|p| p.workspace != workspace);
-        while self.panes.len() >= 3
+        self.panes
+            .retain(|p| p.workspace != workspace || p.geometry.size != geometry.size);
+        while self.panes.len() >= 6
             || self
                 .panes
                 .iter()

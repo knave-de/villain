@@ -9,8 +9,8 @@ resets visibility, so a supervised restart begins hidden. Visibility is not
 persistent. The shell sends up to three workspace IDs and rectangles in logical
 output coordinates. Villain
 rejects duplicate IDs, invalid workspaces, zero or oversized rectangles, and
-requests without a mapped overview layer surface with a retryable unavailable
-response. Replacing the list requests a repaint. Unmapping or destroying
+requests without a registered overview layer surface with a retryable unavailable
+response. The validated list is staged and applied on the next Overview surface commit. Unmapping or destroying
 `knave-shell-overview` clears the list; output resize invalidates its geometry. There is no persistent state.
 
 Both nested Winit and direct TTY use the same render-element construction.
@@ -42,8 +42,8 @@ empty workspaces have no empty minimized shelf or placeholder covering wallpaper
 Overview's dimmer is compositor-owned and sits below the panes. Its full-output
 backdrop excludes the bar, so wallpaper reaches all four screen edges.
 
-Rounded pane textures use an LRU capped at three entries and 36 Mi pixels,
-separate from the scene-effects cache. The key includes workspace, geometry and
+Rounded pane textures use an LRU capped at six entries and 36 Mi pixels,
+separate from the scene-effects cache. The key includes workspace, dimensions and
 source IDs, commits, crop, transform and alpha. Static repaint reuses textures;
 window commits and layout changes replace the affected entry. Eviction, reload
 and compositor shutdown release textures. Two transient pane targets are bounded
@@ -59,3 +59,14 @@ threads and 54 FDs. The preceding implementation measured about 225892/231240 Ki
 respectively in the same software-rendered harness, with the same thread/FD counts;
 these short, separate runs are not a controlled GPU-memory or long-run comparison.
 Direct-TTY, hardware GPU, output hotplug and prolonged stress remain unverified.
+
+Opening synchronization: Shell waits for the bounded pane worker's acknowledgement
+before submitting the matching UI buffer. Villain accepts layout before mapping,
+stages it without repainting, and activates it with the Overview buffer commit.
+Backdrop/window/bar visibility follows the mapped surface, not the earlier request.
+This avoids the previous 250 ms unavailable retry and the intermediate backdrop
+swap. Pane movement reuses same-size textures; six size variants remain bounded
+by 36 Mi pixels. No timers, workers, processes or polling are added. The existing
+Wayland lifecycle regression asserts pending geometry stays invisible until commit
+and is cleared on unmap. In the 20 fps recording, five openings contained complete
+wallpaper in the first visible card frame; sub-frame latency is not established.

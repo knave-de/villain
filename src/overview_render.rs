@@ -36,7 +36,8 @@ pub fn elements(
         .map(OverviewRenderElement::Cursor)
         .collect();
     let output = state.output_size;
-    if state.overview_visible {
+    let overview_mapped = state.overview_mapped();
+    if overview_mapped {
         use smithay::{
             backend::renderer::element::AsRenderElements, desktop::layer_map_for_output,
         };
@@ -65,7 +66,13 @@ pub fn elements(
             }
         }
     }
-    for pane in state.overview_panes.clone().iter().rev() {
+    for pane in state
+        .overview_panes
+        .clone()
+        .iter()
+        .rev()
+        .filter(|_| overview_mapped)
+    {
         if state
             .workspace_preview_scene(pane.workspace.0 as usize - 1)
             .is_none()
@@ -88,7 +95,7 @@ pub fn elements(
         state.appearance_renderer = effects;
         result.push(OverviewRenderElement::Scene(element?));
     }
-    if state.overview_visible {
+    if overview_mapped {
         result.push(OverviewRenderElement::ScreenshotOverlay(
             SolidColorRenderElement::new(
                 state.overview_backdrop_id.clone(),
