@@ -190,12 +190,9 @@ mod tests {
     fn wildcards_and_case_are_insensitive() {
         assert!(matches(
             "*Receiver Mouse",
-            "Compx 2.4G Wireless Receiver Mouse"
+            "Example Wireless Receiver Mouse"
         ));
-        assert!(matches(
-            "Asuf1204:00 2808:0104 touchpad",
-            "ASUF1204:00 2808:0104 Touchpad"
-        ));
+        assert!(matches("Example Touchpad", "example touchpad"));
         assert!(matches(
             "AT Translated Set 2 keyboard",
             "at translated set 2 keyboard"
@@ -223,18 +220,21 @@ mod tests {
             ..Default::default()
         };
 
-        assert!(resolved_enabled(&[], "Compx 2.4G Wireless Receiver Mouse"));
+        assert!(resolved_enabled(&[], "Example Wireless Receiver Mouse"));
         assert!(resolved_enabled(
             &[rule("*", None)],
-            "Compx 2.4G Wireless Receiver Mouse"
+            "Example Wireless Receiver Mouse"
         ));
         assert!(!resolved_enabled(
             &[rule("*Receiver Mouse", Some(false))],
-            "Compx 2.4G Wireless Receiver Mouse"
+            "Example Wireless Receiver Mouse"
         ));
         assert!(resolved_enabled(
-            &[rule("*Mouse", Some(false)), rule("Compx 2.4G*", Some(true)),],
-            "Compx 2.4G Wireless Receiver Mouse"
+            &[
+                rule("*Mouse", Some(false)),
+                rule("Example Wireless*", Some(true)),
+            ],
+            "Example Wireless Receiver Mouse"
         ));
         // A rule for a mouse never affects the keyboard.
         assert!(resolved_enabled(
