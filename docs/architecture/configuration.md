@@ -6,9 +6,18 @@ The canonical user configuration is
 Villain consumes the typed [compositor] projection:
 
 - modkey and bind define compositor key dispatch;
-- input defines touchpad policy; and
+- input defines global touchpad policy;
+- device lists per-device rules matched by name; and
 - environment_file selects an optional environment fragment relative to the
   Knave configuration file.
+
+Villain applies the global [compositor.input] policy, then every matching
+[[compositor.device]] rule in file order, when a libinput device is added and
+again on `knavectl reload`. A device is enabled unless a matching rule sets
+`enabled = false`, so removing that rule and reloading restores events. Only the
+fields present in a rule are changed; the rest keep their libinput values. The
+`devices` desktop query reports each device, its current enabled state, its
+libinput capabilities, and the index of the last rule that matched it.
 
 If no [compositor] table exists, Knave projects root-level modkey,
 environment_file, [input], and [[bind]] values into this model. Villain reads

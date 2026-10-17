@@ -447,6 +447,7 @@ impl Villain {
                 }
                 DesktopQuery::Windows => DesktopResponse::Windows(self.window_info()),
                 DesktopQuery::Workspaces => DesktopResponse::Workspaces(self.workspace_info()),
+                DesktopQuery::Devices => DesktopResponse::Devices(self.device_info()),
                 DesktopQuery::ActiveWindow => {
                     DesktopResponse::ActiveWindow(self.active_window_info())
                 }

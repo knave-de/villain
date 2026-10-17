@@ -30,6 +30,8 @@ pub struct RuntimeConfig {
     pub master_percent: u8,
     pub appearance: knave_config::WindowAppearance,
     pub input: InputConfig,
+    /// Ordered `[[compositor.device]]` rules; later matches override earlier ones.
+    pub devices: Vec<knave_config::CompositorDeviceConfig>,
     pub keybinds: KeybindRegistry,
     pub environment: BTreeMap<String, String>,
     path: PathBuf,
@@ -111,6 +113,7 @@ impl RuntimeConfig {
                 tap_to_click: compositor.input.tap_to_click,
                 natural_scroll: compositor.input.natural_scroll,
             },
+            devices: compositor.device.clone(),
             keybinds,
             environment,
             path,
@@ -320,6 +323,39 @@ dispatch = "close"
         let config = RuntimeConfig::load_from(path).unwrap();
         assert!(!config.input.tap_to_click);
         assert!(!config.input.natural_scroll);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn device_rules_are_projected_from_the_knave_configuration() {
+        let directory =
+            std::env::temp_dir().join(format!("villain-device-config-{}", std::process::id()));
+        fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("config.toml");
+        fs::write(
+            &path,
+            r#"schema_version = 2
+[compositor]
+modkey = "Super"
+
+[[compositor.device]]
+name = "*Touchpad"
+enabled = false
+sensitivity = 0.5
+scroll_method = "two_finger"
+"#,
+        )
+        .unwrap();
+
+        let config = RuntimeConfig::load_from(path).unwrap();
+        assert_eq!(config.devices.len(), 1);
+        assert_eq!(config.devices[0].name, "*Touchpad");
+        assert_eq!(config.devices[0].enabled, Some(false));
+        assert_eq!(config.devices[0].sensitivity, Some(0.5));
+        assert_eq!(
+            config.devices[0].scroll_method,
+            Some(knave_config::DeviceScrollMethod::TwoFinger)
+        );
         fs::remove_dir_all(directory).unwrap();
     }
 }
