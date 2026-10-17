@@ -14,6 +14,7 @@ mod dispatch;
 mod focus;
 mod frame_clock;
 mod handlers;
+mod input_devices;
 mod ipc;
 mod keybinds;
 mod layer_shell;

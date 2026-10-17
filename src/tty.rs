@@ -326,7 +326,7 @@ pub fn render_if_needed(state: &mut Villain) {
 fn process_input(event: InputEvent<LibinputInputBackend>, state: &mut Villain) {
     match event {
         InputEvent::DeviceAdded { mut device } => {
-            configure_input_device(&mut device, state.config.input);
+            configure_input_device(&mut device, state.config.input, &state.config.devices);
             if let Some(tty) = state.tty.as_mut() {
                 tty.input_devices.push(device);
             }
@@ -427,10 +427,11 @@ fn process_input(event: InputEvent<LibinputInputBackend>, state: &mut Villain) {
 
 fn configure_input_device(
     device: &mut smithay::reexports::input::Device,
-    config: crate::config::InputConfig,
+    global: crate::config::InputConfig,
+    rules: &[knave_config::CompositorDeviceConfig],
 ) {
     if device.config_tap_finger_count() > 0
-        && let Err(error) = device.config_tap_set_enabled(config.tap_to_click)
+        && let Err(error) = device.config_tap_set_enabled(global.tap_to_click)
     {
         tracing::warn!(
             device = device.name(),
@@ -439,7 +440,7 @@ fn configure_input_device(
         );
     }
     if device.config_scroll_has_natural_scroll()
-        && let Err(error) = device.config_scroll_set_natural_scroll_enabled(config.natural_scroll)
+        && let Err(error) = device.config_scroll_set_natural_scroll_enabled(global.natural_scroll)
     {
         tracing::warn!(
             device = device.name(),
@@ -447,15 +448,63 @@ fn configure_input_device(
             "could not configure natural scrolling"
         );
     }
+    // Device rules layer over the global policy in file order; later matches win.
+    let name = device.name().to_owned();
+    crate::input_devices::set_enabled(device, crate::input_devices::resolved_enabled(rules, &name));
+    for rule in rules {
+        if crate::input_devices::matches(&rule.name, &name) {
+            crate::input_devices::apply(device, rule);
+        }
+    }
 }
 
 impl Villain {
     pub fn apply_input_config(&mut self) {
-        let config = self.config.input;
+        let global = self.config.input;
+        let rules = self.config.devices.clone();
         if let Some(tty) = self.tty.as_mut() {
             for device in &mut tty.input_devices {
-                configure_input_device(device, config);
+                configure_input_device(device, global, &rules);
             }
         }
+    }
+
+    /// Snapshot the libinput devices for the desktop `devices` query.
+    pub fn device_info(&self) -> Vec<knave_desktop_api::DeviceSummary> {
+        use smithay::reexports::input::{DeviceCapability, SendEventsMode};
+
+        const CAPABILITIES: [(DeviceCapability, &str); 7] = [
+            (DeviceCapability::Keyboard, "keyboard"),
+            (DeviceCapability::Pointer, "pointer"),
+            (DeviceCapability::Touch, "touch"),
+            (DeviceCapability::TabletTool, "tablet-tool"),
+            (DeviceCapability::TabletPad, "tablet-pad"),
+            (DeviceCapability::Gesture, "gesture"),
+            (DeviceCapability::Switch, "switch"),
+        ];
+
+        let Some(tty) = self.tty.as_ref() else {
+            // The nested Winit backend has no libinput seat.
+            return Vec::new();
+        };
+        tty.input_devices
+            .iter()
+            .map(|device| knave_desktop_api::DeviceSummary {
+                name: device.name().to_owned(),
+                enabled: !device
+                    .config_send_events_mode()
+                    .contains(SendEventsMode::DISABLED),
+                capabilities: CAPABILITIES
+                    .iter()
+                    .filter(|(capability, _)| device.has_capability(*capability))
+                    .map(|(_, label)| (*label).to_owned())
+                    .collect(),
+                matched_rule: self
+                    .config
+                    .devices
+                    .iter()
+                    .rposition(|rule| crate::input_devices::matches(&rule.name, device.name())),
+            })
+            .collect()
     }
 }

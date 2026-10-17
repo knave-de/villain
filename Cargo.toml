@@ -38,3 +38,10 @@ wayland-protocols = { version = "0.32", features = ["server", "staging"] }
 wayland-client = "0.31"
 wayland-protocols = { version = "0.32", features = ["client"] }
 wayland-protocols-wlr = { version = "0.3", features = ["client"] }
+
+# Local development override: build against the sibling Knave checkout so
+# per-device input rules can be exercised before the Knave change is pushed.
+# Remove this block and bump the git revs above once Knave is published.
+[patch."https://github.com/knave-de/knave.git"]
+knave-config = { path = "../knave/crates/knave-config" }
+knave-desktop-api = { path = "../knave/crates/knave-desktop-api" }
