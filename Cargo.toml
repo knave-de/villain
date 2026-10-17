@@ -27,8 +27,8 @@ smithay = { version = "0.7.0", default-features = false, features = [
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 xcursor = "0.3.11"
-knave-desktop-api = { git = "https://github.com/knave-de/knave.git", rev = "73f6548b026d2ecfffdc0bc9234ae0ab30d8bacc" }
-knave-config = { git = "https://github.com/knave-de/knave.git", rev = "3ef4a82a2dd173999f0500515f69b79fc9c32b88" }
+knave-desktop-api = { git = "https://github.com/knave-de/knave.git", rev = "53a96f3c5e201c38bd7a316785534a0c3e068593" }
+knave-config = { git = "https://github.com/knave-de/knave.git", rev = "53a96f3c5e201c38bd7a316785534a0c3e068593" }
 serde_json = "1"
 base64 = "0.22"
 png = "0.18"
@@ -38,10 +38,3 @@ wayland-protocols = { version = "0.32", features = ["server", "staging"] }
 wayland-client = "0.31"
 wayland-protocols = { version = "0.32", features = ["client"] }
 wayland-protocols-wlr = { version = "0.3", features = ["client"] }
-
-# Local development override: build against the sibling Knave checkout so
-# per-device input rules can be exercised before the Knave change is pushed.
-# Remove this block and bump the git revs above once Knave is published.
-[patch."https://github.com/knave-de/knave.git"]
-knave-config = { path = "../knave/crates/knave-config" }
-knave-desktop-api = { path = "../knave/crates/knave-desktop-api" }

@@ -769,6 +769,7 @@ dependencies = [
 [[package]]
 name = "knave-config"
 version = "0.1.0"
+source = "git+https://github.com/knave-de/knave.git?rev=53a96f3c5e201c38bd7a316785534a0c3e068593#53a96f3c5e201c38bd7a316785534a0c3e068593"
 dependencies = [
  "serde",
  "thiserror 2.0.20",
@@ -779,6 +780,7 @@ dependencies = [
 [[package]]
 name = "knave-desktop-api"
 version = "0.1.0"
+source = "git+https://github.com/knave-de/knave.git?rev=53a96f3c5e201c38bd7a316785534a0c3e068593#53a96f3c5e201c38bd7a316785534a0c3e068593"
 dependencies = [
  "serde",
  "serde_json",
