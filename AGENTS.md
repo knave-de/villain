@@ -46,8 +46,8 @@ For each shared change, find every sender and receiver, update them together,
 run coordinated package tests, and document user-visible effects.
 
 Villain must not create a second user-facing configuration store. It consumes
-validated projections from ~/.config/knave/config.toml and keeps source
-configuration readable only as an explicit migration path.
+validated projections from `[compositor]` in ~/.config/knave/config.toml.
+The unreleased config format has no schema version or legacy migration paths.
 
 ## Runtime safety
 

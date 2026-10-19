@@ -70,19 +70,14 @@ Control commands are issued through knavectl:
 
 ## Configuration
 
-The target persistent configuration is
-~/.config/knave/config.toml, owned and schema-versioned by Knave. The
-compositor settings live under [compositor] with modkey, input,
-environment_file, and bind entries. Knave projects the old root-level
-modkey, environment_file, [input], and [[bind]] keys when that table is
-absent, preserving the source document for rollback. Villain never writes a
-second configuration store. Villain receives the validated projection during
-session startup and reload; root-level compatibility is migration-only and must
-not silently delete old values.
+The canonical configuration is `~/.config/knave/config.toml`, owned by Knave.
+Compositor settings live under `[compositor]` with modkey, input,
+environment_file, and bind entries. Villain receives the validated projection
+during session startup and reload. The unreleased format has no schema version
+or root-level compatibility projection.
 
-The tracked `config.example.toml` is a root-level migration/test fixture only; it
-is not loaded or installed by Villain. Create and edit the canonical Knave
-configuration instead.
+The tracked `config.example.toml` demonstrates the `[compositor]` section of
+Knave's canonical config. Villain does not install a separate config file.
 
 ## Repository boundaries
 

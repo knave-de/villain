@@ -1,7 +1,7 @@
 # Master/stack split resizing
 
 Villain owns the per-workspace master ratio, divider hit testing, pointer grab,
-keyboard actions and window geometry. Knave owns the additive schema-1
+keyboard actions and window geometry. Knave owns the optional
 `[compositor] master_percent` setting (integer 10..90, default 50). The Shell
 and desktop contract are unchanged. Individual stack dividers are outside this
 slice. Villain pins knave-config at `d051735bca26affc370467779dbb1f625cac6318`.
@@ -37,9 +37,8 @@ knavectl IPC commands.
 Existing configs retain 50/50. Publish/deploy the Knave config commit before
 Villain's dependency pin. For development before publication, use a local Cargo
 patch to the matching knave-config checkout. The exact git pin was verified
-through Cargo's local git cache, with no committed filesystem override. No API,
-schema or binary version increment is needed for this optional schema-1 setting. Old Knave preserves the unknown
-scalar setting; old Villain ignores it. Rolling back Villain requires removing
+through Cargo's local git cache, with no committed filesystem override. No API or
+binary version increment is needed for this optional setting. Rolling back Villain requires removing
 new actions from custom binding sets, since old dispatch parsers reject them.
 Leave the new percentage setting in place or remove it explicitly.
 
