@@ -291,6 +291,7 @@ impl Villain {
                     }
                 }
                 transition.settle = Some((Instant::now(), transition.offset, end));
+                self.gestures.transition_device = Some(stream.device);
                 self.gestures.transition = Some(transition);
                 self.request_repaint();
                 match self.loop_handle.insert_source(
@@ -309,6 +310,7 @@ impl Villain {
                         state.request_repaint();
                         if progress >= 1.0 {
                             state.gestures.transition = None;
+                            state.gestures.transition_device = None;
                             state.gestures.timer = None;
                             TimeoutAction::Drop
                         } else {
@@ -360,6 +362,14 @@ mod tests {
                 .unwrap();
         }
         assert!(state.gestures.timer.is_none());
+        state.swipe_begin("pad".into(), 3, 6);
+        state.swipe_update("pad", -100.0, 0.0, 7);
+        state.swipe_end("pad", false, 8);
+        assert_eq!(state.active_workspace, 2);
+        state.swipe_device_removed("pad");
+        assert!(state.gestures.transition.is_none());
+        assert!(state.gestures.timer.is_none());
+        state.switch_workspace(1);
         state.swipe_begin("pad".into(), 3, 6);
         state.swipe_update("pad", -100.0, 0.0, 7);
         state.swipe_end("pad", true, 8);
