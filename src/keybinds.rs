@@ -4,7 +4,7 @@ use std::collections::HashSet;
 
 use smithay::{
     backend::input::{InputBackend, KeyState, KeyboardKeyEvent},
-    input::keyboard::{FilterResult, Keysym, keysyms, xkb},
+    input::keyboard::{FilterResult, KeyboardTarget, Keycode, Keysym, keysyms, xkb},
     utils::SERIAL_COUNTER,
 };
 
@@ -355,16 +355,20 @@ pub fn handle_keyboard_event<B: InputBackend>(
     state: &mut Villain,
     event: impl KeyboardKeyEvent<B>,
 ) {
-    let code = event.key_code();
-    let pressed = event.state() == KeyState::Pressed;
+    handle_keyboard_key(state, event.key_code(), event.state(), event.time_msec());
+}
+
+pub(crate) fn handle_keyboard_key(
+    state: &mut Villain,
+    code: Keycode,
+    key_state: KeyState,
+    time: u32,
+) {
+    let pressed = key_state == KeyState::Pressed;
     let keyboard = state.keyboard.clone();
-    let action = keyboard.input(
-        state,
-        code,
-        event.state(),
-        SERIAL_COUNTER.next_serial(),
-        event.time_msec(),
-        |state, mods, key| {
+    let serial = SERIAL_COUNTER.next_serial();
+    let (result, mods_changed) =
+        keyboard.input_intercept(state, code, key_state, |state, mods, key| {
             if !pressed
                 && state
                     .pending_modifier
@@ -457,9 +461,27 @@ pub fn handle_keyboard_event<B: InputBackend>(
                 return FilterResult::Intercept(Some(KeyboardAction::Dispatch(action)));
             }
             FilterResult::Forward
-        },
-    );
-    match action.flatten() {
+        });
+    let action = match result {
+        FilterResult::Forward => {
+            keyboard.input_forward(state, code, key_state, serial, time, mods_changed);
+            None
+        }
+        FilterResult::Intercept(action) => {
+            // Intercepting a key also skips Smithay's modifier delivery. A
+            // client entered while MOD is held must still see its release.
+            if mods_changed && let Some(focus) = keyboard.current_focus() {
+                focus.modifiers(
+                    &state.seat.clone(),
+                    state,
+                    keyboard.modifier_state(),
+                    serial,
+                );
+            }
+            action
+        }
+    };
+    match action {
         Some(KeyboardAction::Dispatch(dispatch)) => {
             if let Err(error) = state.dispatch(dispatch) {
                 tracing::debug!(%error, "keybind dispatch had no effect");
@@ -475,7 +497,6 @@ pub fn handle_keyboard_event<B: InputBackend>(
         }
         None => {}
     }
-    state.flush_pending_focus();
 }
 
 #[cfg(test)]

@@ -108,7 +108,8 @@ selected. Workspace switches, minimization, and closure also restore visible
 window focus. Keyboard-interactive shell surfaces such as overview and launchers
 can take focus; empty workspaces, fully minimized workspaces, host focus loss,
 and suspended TTY sessions can have no focused window. Shortcut-driven focus
-changes wait until compositor-intercepted keys are released.
+changes apply immediately, including each Tab press while MOD stays held.
+Intercepted modifier releases update the focused client to prevent stuck modifiers.
 
 `MOD+Tab` cycles focus across the workspace's windows, and `MOD+Shift+Tab`
 walks the cycle backwards. Both wrap. The walk order comes from

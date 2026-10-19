@@ -11,7 +11,8 @@ use wayland_client::{
     Connection, Dispatch, QueueHandle, delegate_noop,
     globals::{GlobalListContents, registry_queue_init},
     protocol::{
-        wl_buffer, wl_compositor, wl_pointer, wl_registry, wl_seat, wl_shm, wl_shm_pool, wl_surface,
+        wl_buffer, wl_compositor, wl_keyboard, wl_pointer, wl_registry, wl_seat, wl_shm,
+        wl_shm_pool, wl_surface,
     },
 };
 use wayland_protocols::xdg::shell::client::{xdg_surface, xdg_toplevel, xdg_wm_base};
@@ -29,6 +30,9 @@ struct Client {
     configures: HashMap<usize, Configure>,
     pointer_buttons: usize,
     swipes: Vec<String>,
+    keyboard_modifiers: Vec<u32>,
+    keyboard_keys: Vec<u32>,
+    keyboard_enters: Vec<(wl_surface::WlSurface, Vec<u8>)>,
 }
 impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for Client {
     fn event(
@@ -141,6 +145,27 @@ impl Dispatch<zwp_pointer_gesture_swipe_v1::ZwpPointerGestureSwipeV1, ()> for Cl
             }
             .into(),
         );
+    }
+}
+impl Dispatch<wl_keyboard::WlKeyboard, ()> for Client {
+    fn event(
+        state: &mut Self,
+        _: &wl_keyboard::WlKeyboard,
+        event: wl_keyboard::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        match event {
+            wl_keyboard::Event::Modifiers { mods_depressed, .. } => {
+                state.keyboard_modifiers.push(mods_depressed)
+            }
+            wl_keyboard::Event::Key { key, .. } => state.keyboard_keys.push(key),
+            wl_keyboard::Event::Enter { surface, keys, .. } => {
+                state.keyboard_enters.push((surface, keys))
+            }
+            _ => {}
+        }
     }
 }
 delegate_noop!(Client: ignore wl_shm::WlShm);
@@ -335,10 +360,8 @@ fn wayland_floating_and_fullscreen_requests() {
             s.suppressed_keys
                 .insert(smithay::input::keyboard::Keycode::new(125));
             s.cycle_focus(FocusCycleStep::Next);
-            assert_eq!(s.pending_focus_window, Some((primary, false)));
-            assert!(find(s, "other").focused);
+            assert_eq!(s.active_window_info().unwrap().id, primary);
             s.suppressed_keys.clear();
-            s.flush_pending_focus();
             assert!(find(s, "primary").focused);
             use smithay::backend::input::ButtonState;
             let focus = s.keyboard.current_focus();
@@ -594,9 +617,8 @@ fn wayland_floating_and_fullscreen_requests() {
         inspect(&sender, |state| {
             assert!(!find(state, "primary").maximized);
             assert!(mapped(state, "new-app"));
-            assert!(state.pending_focus_restore);
+            assert!(find(state, "new-app").focused);
             state.suppressed_keys.clear();
-            state.flush_pending_focus();
             assert!(find(state, "new-app").focused);
             assert!(mapped(state, "primary") && mapped(state, "other"));
         });
@@ -941,6 +963,8 @@ fn directional_focus_and_cycle_order_follow_configuration() {
         let compositor: wl_compositor::WlCompositor = globals.bind(&qh, 1..=4, ()).unwrap();
         let wm: xdg_wm_base::XdgWmBase = globals.bind(&qh, 1..=6, ()).unwrap();
         let shm: wl_shm::WlShm = globals.bind(&qh, 1..=1, ()).unwrap();
+        let seat: wl_seat::WlSeat = globals.bind(&qh, 1..=7, ()).unwrap();
+        let _keyboard = seat.get_keyboard(&qh, ());
         let mut client = Client::default();
         let create = |id, name: &str| {
             let surface = compositor.create_surface(&qh, ());
@@ -1052,68 +1076,59 @@ fn directional_focus_and_cycle_order_follow_configuration() {
             assert!(find(state, "tertiary").focused);
             state.config.focus_cycle_order = knave_config::FocusCycleOrder::Layout;
 
-            // Repeated focus commands advance their logical target while the
-            // client keyboard focus remains deferred until MOD is released.
+            // Physical Super stays held across Tab taps and direction changes.
             state.focus_window(find(state, "primary").id);
-            let mod_key = smithay::input::keyboard::Keycode::new(125);
-            state.suppressed_keys.insert(mod_key);
-            let actual_focus = state.keyboard.current_focus();
-            for target_name in ["other", "tertiary"] {
-                state
-                    .dispatch(Dispatch::FocusCycle(FocusCycleStep::Next))
-                    .unwrap();
-                let target = find(state, target_name).id;
-                assert_eq!(state.pending_focus_window, Some((target, false)));
-                assert_eq!(state.keyboard.current_focus(), actual_focus);
-                assert_eq!(
-                    state
-                        .focused_window()
-                        .and_then(|window| state.window_id(&window)),
-                    Some(target)
+            use crate::keybinds::handle_keyboard_key;
+            use smithay::{
+                backend::input::KeyState::{Pressed, Released},
+                input::keyboard::Keycode,
+            };
+            handle_keyboard_key(state, Keycode::new(133), Pressed, 1); // evdev left Super + 8
+            for target in ["other", "tertiary", "primary", "other"] {
+                handle_keyboard_key(state, Keycode::new(23), Pressed, 2); // Tab
+                assert!(
+                    find(state, target).focused,
+                    "focus changes before either key is released"
                 );
+                handle_keyboard_key(state, Keycode::new(23), Released, 3);
             }
-            state.suppressed_keys.remove(&mod_key);
-            state.flush_pending_focus();
-            assert!(find(state, "tertiary").focused);
-
-            // Returning to the already keyboard-focused window clears the
-            // deferred target instead of replaying a stale intermediate one.
-            state.focus_window(find(state, "primary").id);
-            state.suppressed_keys.insert(mod_key);
-            for _ in 0..3 {
-                state
-                    .dispatch(Dispatch::FocusCycle(FocusCycleStep::Next))
-                    .unwrap();
-            }
-            assert!(!state.pending_focus_restore);
-            assert_eq!(state.pending_focus_window, None);
-            state.suppressed_keys.remove(&mod_key);
-            state.flush_pending_focus();
-            assert!(find(state, "primary").focused);
-
-            // Directional focus uses the pending selection as its origin too.
-            state.focus_window(find(state, "tertiary").id);
-            state.suppressed_keys.insert(mod_key);
-            state
-                .dispatch(Dispatch::FocusDirection(FocusDirection::Left))
-                .unwrap();
-            assert_eq!(
-                state.pending_focus_window,
-                Some((find(state, "primary").id, true))
+            handle_keyboard_key(state, Keycode::new(50), Pressed, 4); // Shift
+            handle_keyboard_key(state, Keycode::new(23), Pressed, 5);
+            assert!(
+                find(state, "primary").focused,
+                "Shift reverses without releasing Super"
             );
-            state
-                .dispatch(Dispatch::FocusDirection(FocusDirection::Right))
-                .unwrap();
-            assert_eq!(
-                state.pending_focus_window,
-                Some((find(state, "other").id, true))
-            );
-            state.suppressed_keys.remove(&mod_key);
-            state.flush_pending_focus();
+            handle_keyboard_key(state, Keycode::new(23), Released, 6);
+            handle_keyboard_key(state, Keycode::new(50), Released, 7);
+            handle_keyboard_key(state, Keycode::new(46), Pressed, 8); // L
             assert!(find(state, "other").focused);
+            handle_keyboard_key(state, Keycode::new(46), Released, 9);
+            handle_keyboard_key(state, Keycode::new(133), Released, 10);
+            assert!(state.suppressed_keys.is_empty());
+            assert!(!state.keyboard.modifier_state().logo);
             state.focus_window(find(state, "primary").id);
         });
         settle(&mut queue, &mut client);
+        assert!(
+            client.keyboard_modifiers.iter().any(|mods| *mods != 0),
+            "held modifiers reach client"
+        );
+        assert_eq!(
+            client.keyboard_modifiers.last(),
+            Some(&0),
+            "intercepted Super release clears client modifiers"
+        );
+        assert!(
+            client.keyboard_keys.iter().all(|key| *key == 42),
+            "shortcut keys never reach client (Shift may be forwarded)"
+        );
+        assert!(
+            client
+                .keyboard_enters
+                .iter()
+                .all(|(_, keys)| keys.is_empty() || keys.as_slice() == 42u32.to_ne_bytes()),
+            "enter excludes intercepted shortcut keys"
+        );
         inspect(&sender, |state| {
             assert!(find(state, "primary").focused || find(state, "tertiary").focused);
             let id = find(state, "primary").id;

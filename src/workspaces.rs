@@ -915,7 +915,6 @@ impl Villain {
         if index >= self.workspaces.len() {
             return;
         }
-        self.pending_focus_window = None;
         self.cancel_swipe(0);
         self.remember_current_window_focus();
         if !self
@@ -1363,19 +1362,6 @@ impl Villain {
     }
 
     pub(crate) fn focused_window(&self) -> Option<Window> {
-        if self.pending_focus_restore
-            && let Some((id, _)) = self.pending_focus_window
-            && self.window_is_visible(self.active_workspace, id)
-            && let Some(window) = self.workspaces[self.active_workspace]
-                .windows
-                .iter()
-                .find(|entry| entry.id == id)
-                .map(|entry| entry.window.clone())
-        {
-            // Keep compositor-side focus actions moving from the latest
-            // selection while client keyboard focus waits for shortcut release.
-            return Some(window);
-        }
         let focused = self.keyboard.current_focus()?;
         self.workspaces[self.active_workspace]
             .windows
@@ -1500,24 +1486,9 @@ impl Villain {
         }
         let surface = self.exclusive_layer_focus().unwrap_or(surface);
         if self.keyboard.current_focus().as_ref() != Some(&surface) {
-            // Compositor shortcuts are intercepted, so Smithay's forwarded
-            // key set does not contain the keys that are still held.  Moving
-            // keyboard focus now would send the new client a modifier state
-            // without the matching key press/release lifecycle.  Wait until
-            // the shortcut is released and the keyboard state is neutral.
-            if !self.suppressed_keys.is_empty() {
-                self.pending_focus_restore = true;
-                self.pending_focus_window = Some((id, remember));
-                return true;
-            }
             self.keyboard
                 .clone()
                 .set_focus(self, Some(surface), SERIAL_COUNTER.next_serial());
-            self.pending_focus_restore = false;
-            self.pending_focus_window = None;
-        } else {
-            self.pending_focus_restore = false;
-            self.pending_focus_window = None;
         }
         true
     }
@@ -1533,44 +1504,12 @@ impl Villain {
         {
             return;
         }
-        if !self.suppressed_keys.is_empty() {
-            self.pending_focus_restore = true;
-            self.pending_focus_window = None;
-            return;
-        }
         if let Some(window) = self.last_visible_window(self.active_workspace) {
             self.focus_managed_window(&window);
         } else if self.keyboard.current_focus().is_some() {
             self.keyboard
                 .clone()
                 .set_focus(self, None, SERIAL_COUNTER.next_serial());
-            self.pending_focus_restore = false;
-            self.pending_focus_window = None;
-        }
-    }
-
-    /// Apply a focus transition postponed while a compositor shortcut was held.
-    pub fn flush_pending_focus(&mut self) {
-        if self.pending_focus_restore
-            && self.suppressed_keys.is_empty()
-            && self.host_focused
-            && !self.keyboard.is_grabbed()
-        {
-            let index = self.active_workspace;
-            let pending = self.pending_focus_window.take();
-            self.pending_focus_restore = false;
-            if let Some((id, remember)) = pending
-                && self.window_is_visible(index, id)
-                && let Some(window) = self.workspaces[index]
-                    .windows
-                    .iter()
-                    .find(|entry| entry.id == id)
-                    .map(|entry| entry.window.clone())
-                && self.apply_managed_focus(&window, remember)
-            {
-                return;
-            }
-            self.restore_active_workspace_focus_inner(true);
         }
     }
 
