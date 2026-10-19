@@ -9,82 +9,9 @@ environment_file = "environment"
 tap_to_click = true
 natural_scroll = true
 
-# If any [[compositor.bind]] entries are present, they replace the complete default set.
-[[compositor.bind]]
-keys = "MOD"
-dispatch = "toggle-overview"
-
-[[compositor.bind]]
-keys = "MOD+RETURN"
-dispatch = "exec"
-args = ["kitty"]
-
+# Each entry overrides the default binding with the same keys; unmentioned
+# defaults stay active and other entries are additions.
 [[compositor.bind]]
 keys = "MOD+Q"
-dispatch = "close"
-
-[[compositor.bind]]
-keys = "MOD+M"
-dispatch = "minimize"
-
-[[compositor.bind]]
-keys = "MOD+SHIFT+M"
-dispatch = "restore-minimized"
-
-[[compositor.bind]]
-keys = "MOD+LEFT"
-dispatch = "previous-workspace"
-
-[[compositor.bind]]
-keys = "MOD+RIGHT"
-dispatch = "next-workspace"
-
-[[compositor.bind]]
-keys = "MOD+1"
-dispatch = "workspace"
-args = ["1"]
-
-[[compositor.bind]]
-keys = "MOD+2"
-dispatch = "workspace"
-args = ["2"]
-
-[[compositor.bind]]
-keys = "MOD+3"
-dispatch = "workspace"
-args = ["3"]
-
-[[compositor.bind]]
-keys = "MOD+4"
-dispatch = "workspace"
-args = ["4"]
-
-[[compositor.bind]]
-keys = "MOD+5"
-dispatch = "workspace"
-args = ["5"]
-
-[[compositor.bind]]
-keys = "MOD+6"
-dispatch = "workspace"
-args = ["6"]
-
-[[compositor.bind]]
-keys = "MOD+7"
-dispatch = "workspace"
-args = ["7"]
-
-[[compositor.bind]]
-keys = "MOD+8"
-dispatch = "workspace"
-args = ["8"]
-
-[[compositor.bind]]
-keys = "MOD+9"
-dispatch = "workspace"
-args = ["9"]
-
-[[compositor.bind]]
-keys = "MOD+0"
-dispatch = "workspace"
-args = ["10"]
+dispatch = "exec"
+args = ["bemenu-run"]

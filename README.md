@@ -124,8 +124,9 @@ the normal layout. Child dialogs remain visible above their maximized parent.
     knavectl dispatch unmaximize
     knavectl dispatch toggle-maximize
 
-Custom binding sets replace the defaults. Add this to the existing canonical
-Knave configuration when using custom bindings:
+Custom bindings override the default with the same key combination; other
+defaults stay active. Add this to the existing canonical Knave configuration
+when overriding a binding:
 
 ```toml
 [[compositor.bind]]
@@ -151,9 +152,9 @@ changes to a horizontal resize cursor. Default shortcuts are `MOD+Ctrl+Left`
 `MOD+Ctrl+R` (reset to the configured default). Each key press makes one step.
 `MOD` is the configured modkey, normally Super.
 
-Custom binding sets replace defaults. Append these entries to your existing
-configuration if you use custom bindings; change the keys or signed step size
-as desired:
+Custom bindings override the defaults with the same key combination. Append
+these entries to your existing configuration to use them; change the keys or
+signed step size as desired:
 
 ```toml
 [[compositor.bind]]
@@ -195,7 +196,8 @@ input, so the frozen image keeps tooltips and other layer surfaces visible.
 | `MOD+Shift+Print` | Copy the focused window as PNG |
 
 Saved files go to `$XDG_PICTURES_DIR/Screenshots` or `~/Pictures/Screenshots`.
-Custom binding sets replace defaults; these actions use
+Custom bindings override matching defaults and are additive otherwise; these
+actions use
 `dispatch = "screenshot"` with arguments `region|output|window` and
 `save|clipboard`.
 

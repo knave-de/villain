@@ -27,8 +27,8 @@ handler; floating-window grabs retain their existing path.
 
 `resize-master` takes one signed integer percentage-point delta (-80..-1 or
 1..80); `reset-master` takes no arguments. Defaults are MOD+Ctrl+Left/Right
-(-5/+5) and MOD+Ctrl+R. Each press performs one step; custom binding sets replace
-all defaults. Actions are inactive without a visible master/stack split. See
+(-5/+5) and MOD+Ctrl+R. Each press performs one step; custom bindings override
+matching defaults. Actions are inactive without a visible master/stack split. See
 README for exact TOML. These actions are compositor binding dispatches, not new
 knavectl IPC commands.
 
