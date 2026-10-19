@@ -105,7 +105,7 @@ pub fn init_winit(
                 if crate::screenshot::pointer_motion(state) {
                     return;
                 }
-                state.refresh_pointer(event.time_msec());
+                state.refresh_pointer_motion(event.time_msec());
             }
             WinitEvent::Input(InputEvent::PointerButton { event }) => {
                 if crate::screenshot::pointer_button(

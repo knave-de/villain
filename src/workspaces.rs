@@ -1,5 +1,9 @@
 //! Ordered workspaces with a master-and-stack layout.
-use crate::{focus::KeyboardFocus, state::Villain};
+use crate::{
+    dispatch::{FocusCycleStep, FocusDirection},
+    focus::KeyboardFocus,
+    state::Villain,
+};
 use knave_desktop_api::{
     WindowId, WindowSummary as WindowInfo, WorkspaceId, WorkspaceSummary as WorkspaceInfo,
 };
@@ -73,6 +77,40 @@ fn master_stack_layout(
 
 pub(crate) fn master_width(width: i32, ratio: u16) -> i32 {
     ((i64::from(width) * i64::from(ratio.clamp(1000, 9000))) / 10000) as i32
+}
+
+fn center_of(rect: &Rectangle<i32, smithay::utils::Logical>) -> (f64, f64) {
+    (
+        f64::from(rect.loc.x) + f64::from(rect.size.w) / 2.0,
+        f64::from(rect.loc.y) + f64::from(rect.size.h) / 2.0,
+    )
+}
+
+/// Pick the candidate whose center is nearest to `origin` while requiring the
+/// candidate center to lie strictly in `direction`. First match wins ties, so
+/// layout order breaks distance dead heats deterministically.
+fn nearest_center_in_direction(
+    centers: &[(f64, f64)],
+    origin: (f64, f64),
+    direction: FocusDirection,
+) -> Option<usize> {
+    let in_direction = |center: (f64, f64)| match direction {
+        FocusDirection::Left => center.0 < origin.0,
+        FocusDirection::Right => center.0 > origin.0,
+        FocusDirection::Up => center.1 < origin.1,
+        FocusDirection::Down => center.1 > origin.1,
+    };
+    let mut best: Option<(f64, usize)> = None;
+    for (index, &center) in centers.iter().enumerate() {
+        if !in_direction(center) {
+            continue;
+        }
+        let distance = (center.0 - origin.0).powi(2) + (center.1 - origin.1).powi(2);
+        if best.is_none_or(|(closest, _)| distance < closest) {
+            best = Some((distance, index));
+        }
+    }
+    best.map(|(_, index)| index)
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1088,6 +1126,147 @@ impl Villain {
         Some(true)
     }
 
+    /// Cycle keyboard focus across the active workspace's windows.
+    ///
+    /// Targets are unminimized windows that are not hidden behind a minimized
+    /// ancestor. The walk order follows the configured focus cycle order and
+    /// wraps around; symmetric reverse steps keep the cycle symmetric.
+    pub fn cycle_focus(&mut self, step: FocusCycleStep) {
+        let index = self.active_workspace;
+        let mut candidates = self.focus_cycle_candidates(index);
+        if candidates.is_empty() {
+            return;
+        }
+        let current = self
+            .focused_window()
+            .and_then(|focused| candidates.iter().position(|(_, window)| *window == focused));
+        let sequence = self.focus_cycle_sequence(index, &candidates);
+        let Some(target) = Self::next_focus_target(&sequence, current, step) else {
+            return;
+        };
+        let target_window = candidates.remove(target).1;
+        // A cycle step must not rewrite the recency order: the walk recomputes
+        // from the current focus each press, so repeated presses keep moving
+        // through the whole recency list instead of oscillating.
+        self.reveal_and_focus(index, target_window, false);
+    }
+
+    /// Windows a focus switch may target on workspace `index`, in layout
+    /// insertion order.
+    fn focus_cycle_candidates(&self, index: usize) -> Vec<(WindowId, Window)> {
+        let workspace = &self.workspaces[index];
+        workspace
+            .windows
+            .iter()
+            .filter(|entry| !entry.minimized && !workspace.hidden_by_parent(entry))
+            .map(|entry| (entry.id, entry.window.clone()))
+            .collect()
+    }
+
+    /// Cycle walk order over candidate positions for workspace `index` per
+    /// the configured order: the visible layout order, or most recently
+    /// focused windows first with never-focused windows trailing.
+    fn focus_cycle_sequence(&self, index: usize, candidates: &[(WindowId, Window)]) -> Vec<usize> {
+        match self.config.focus_cycle_order {
+            knave_config::FocusCycleOrder::Layout => return (0..candidates.len()).collect(),
+            knave_config::FocusCycleOrder::Mru => {}
+        }
+        let mut sequence: Vec<usize> = self.workspaces[index]
+            .focus_history
+            .iter()
+            .rev()
+            .filter_map(|id| candidates.iter().position(|(candidate, _)| candidate == id))
+            .collect();
+        // Windows never focused still appear in the cycle, in layout order.
+        for position in 0..candidates.len() {
+            if !sequence.contains(&position) {
+                sequence.push(position);
+            }
+        }
+        sequence
+    }
+
+    /// The candidate position a cycle step moves focus to, wrapping at both
+    /// ends. Without a focused candidate the first sequence entry receives
+    /// focus; a single-candidate cycle stays a no-op.
+    fn next_focus_target(
+        sequence: &[usize],
+        current: Option<usize>,
+        step: FocusCycleStep,
+    ) -> Option<usize> {
+        if sequence.is_empty() {
+            return None;
+        }
+        let Some(sequence_position) =
+            current.and_then(|focused| sequence.iter().position(|entry| *entry == focused))
+        else {
+            return Some(sequence[0]);
+        };
+        let offset = match step {
+            FocusCycleStep::Next => 1,
+            FocusCycleStep::Previous => sequence.len() - 1,
+        };
+        Some(sequence[(sequence_position + offset) % sequence.len()])
+    }
+
+    /// Focus the nearest window spatially in a direction across the active
+    /// workspace. A missing neighbor leaves focus unchanged; overshoot is
+    /// not wrapped in geometry terms.
+    pub fn focus_directional(&mut self, direction: FocusDirection) {
+        let index = self.active_workspace;
+        let Some(current) = self.focused_window() else {
+            return;
+        };
+        let placements = self.workspace_layout(index);
+        let placement_of = |window: &Window| {
+            placements
+                .iter()
+                .find(|(candidate, ..)| candidate == window)
+                .map(|(_, rect, ..)| rect)
+        };
+        let Some(current_rect) = placement_of(&current).cloned() else {
+            return;
+        };
+        let workspace = &self.workspaces[index];
+        let candidates: Vec<(Window, (f64, f64))> = workspace
+            .windows
+            .iter()
+            .filter(|entry| {
+                !entry.minimized && !workspace.hidden_by_parent(entry) && entry.window != current
+            })
+            .filter_map(|entry| {
+                placement_of(&entry.window).map(|rect| (entry.window.clone(), center_of(rect)))
+            })
+            .collect();
+        let centers: Vec<(f64, f64)> = candidates.iter().map(|(_, center)| *center).collect();
+        let Some(target) =
+            nearest_center_in_direction(&centers, center_of(&current_rect), direction)
+                .and_then(|best| candidates.into_iter().nth(best))
+        else {
+            return;
+        };
+        self.reveal_and_focus(index, target.0, true);
+    }
+
+    /// Focus a window on workspace `index`, leaving fullscreen and maximize
+    /// when the target is currently obscured by one of those overlays.
+    /// `remember` controls whether the target moves to the front of the
+    /// workspace's recency order.
+    fn reveal_and_focus(&mut self, index: usize, target: Window, remember: bool) {
+        if index != self.active_workspace {
+            return;
+        }
+        let Some(id) = self.window_id(&target) else {
+            return;
+        };
+        if !self.window_is_visible(index, id) {
+            self.workspaces[index].fullscreen = None;
+            self.workspaces[index].maximized = None;
+            self.relayout_active_workspace();
+        }
+        self.apply_managed_focus(&target, remember);
+    }
+
     pub fn restore_window(&mut self, id: WindowId) -> bool {
         self.desktop_state_dirty = true;
         for (workspace_index, workspace) in self.workspaces.iter_mut().enumerate() {
@@ -1283,6 +1462,10 @@ impl Villain {
     }
 
     fn focus_managed_window(&mut self, window: &Window) -> bool {
+        self.apply_managed_focus(window, true)
+    }
+
+    fn apply_managed_focus(&mut self, window: &Window, remember: bool) -> bool {
         let Some(index) = self.workspace_for_window(window) else {
             return false;
         };
@@ -1295,25 +1478,17 @@ impl Villain {
         let Some(surface) = KeyboardFocus::for_window(window) else {
             return false;
         };
-        self.remember_focused_window(window);
+        if remember {
+            self.remember_focused_window(window);
+        }
         for entry in &self.workspaces[self.active_workspace].windows {
             Self::set_activated(&entry.window, entry.window == *window);
         }
         let surface = self.exclusive_layer_focus().unwrap_or(surface);
         if self.keyboard.current_focus().as_ref() != Some(&surface) {
-            // Compositor shortcuts are intercepted, so Smithay's forwarded
-            // key set does not contain the keys that are still held.  Moving
-            // keyboard focus now would send the new client a modifier state
-            // without the matching key press/release lifecycle.  Wait until
-            // the shortcut is released and the keyboard state is neutral.
-            if !self.suppressed_keys.is_empty() {
-                self.pending_focus_restore = true;
-                return true;
-            }
             self.keyboard
                 .clone()
                 .set_focus(self, Some(surface), SERIAL_COUNTER.next_serial());
-            self.pending_focus_restore = false;
         }
         true
     }
@@ -1329,29 +1504,12 @@ impl Villain {
         {
             return;
         }
-        if !self.suppressed_keys.is_empty() {
-            self.pending_focus_restore = true;
-            return;
-        }
         if let Some(window) = self.last_visible_window(self.active_workspace) {
             self.focus_managed_window(&window);
         } else if self.keyboard.current_focus().is_some() {
             self.keyboard
                 .clone()
                 .set_focus(self, None, SERIAL_COUNTER.next_serial());
-            self.pending_focus_restore = false;
-        }
-    }
-
-    /// Apply a focus transition postponed while a compositor shortcut was held.
-    pub fn flush_pending_focus(&mut self) {
-        if self.pending_focus_restore
-            && self.suppressed_keys.is_empty()
-            && self.host_focused
-            && !self.keyboard.is_grabbed()
-        {
-            self.pending_focus_restore = false;
-            self.restore_active_workspace_focus_inner(true);
         }
     }
 
@@ -1649,6 +1807,17 @@ impl Villain {
         }
     }
 
+    /// Backend motion entry point: refresh cursor and hit-test visuals, and
+    /// move keyboard focus to the window under the pointer when focus follow
+    /// is enabled (hover-to-focus; otherwise focus switches on click only).
+    pub fn refresh_pointer_motion(&mut self, time: u32) {
+        if self.config.input.focus_follows_mouse {
+            self.refresh_pointer_and_focus(time);
+        } else {
+            self.refresh_pointer(time);
+        }
+    }
+
     pub fn refresh_pointer_surface(&mut self, time: u32) {
         let hit = self.input_window_at_pointer();
         let focus = if self.host_focused {
@@ -1794,6 +1963,96 @@ mod tests {
         let layout = master_stack_layout((801, 601).into(), 4, 5000);
         assert_eq!(layout[0], ((0, 0).into(), (400, 601).into()));
         assert_eq!(layout[3], ((400, 400).into(), (401, 201).into()));
+    }
+
+    #[test]
+    fn cycle_target_walks_wraps_and_restarts_without_focus() {
+        use crate::dispatch::FocusCycleStep;
+        let sequence = [3, 1, 0, 2];
+        assert_eq!(
+            Villain::next_focus_target(&sequence, Some(0), FocusCycleStep::Next),
+            Some(2)
+        );
+        assert_eq!(
+            Villain::next_focus_target(&sequence, Some(2), FocusCycleStep::Next),
+            Some(3)
+        );
+        assert_eq!(
+            Villain::next_focus_target(&sequence, Some(3), FocusCycleStep::Previous),
+            Some(2)
+        );
+        assert_eq!(
+            Villain::next_focus_target(&sequence, Some(0), FocusCycleStep::Previous),
+            Some(1)
+        );
+        // Unfocused or non-candidate focus starts at the sequence head.
+        assert_eq!(
+            Villain::next_focus_target(&sequence, None, FocusCycleStep::Next),
+            Some(3)
+        );
+        assert_eq!(
+            Villain::next_focus_target(&sequence, Some(7), FocusCycleStep::Next),
+            Some(3)
+        );
+        // A single candidate cycle is a no-op in every direction.
+        assert_eq!(
+            Villain::next_focus_target(&[0], Some(0), FocusCycleStep::Next),
+            Some(0)
+        );
+        assert_eq!(
+            Villain::next_focus_target(&[0], Some(0), FocusCycleStep::Previous),
+            Some(0)
+        );
+        assert_eq!(
+            Villain::next_focus_target(&[], None, FocusCycleStep::Next),
+            None
+        );
+    }
+
+    #[test]
+    fn directional_focus_prefers_nearest_strictly_in_direction() {
+        use crate::dispatch::FocusDirection;
+        // Three horizontal centers with the origin between the first two.
+        let centers = [(100.0, 150.0), (400.0, 150.0), (700.0, 150.0)];
+        let origin = (250.0, 150.0);
+        assert_eq!(
+            nearest_center_in_direction(&centers, origin, FocusDirection::Left),
+            Some(0)
+        );
+        assert_eq!(
+            nearest_center_in_direction(&centers, origin, FocusDirection::Right),
+            Some(1)
+        );
+        assert_eq!(
+            nearest_center_in_direction(&centers, origin, FocusDirection::Up),
+            None
+        );
+        assert_eq!(
+            nearest_center_in_direction(&centers, origin, FocusDirection::Down),
+            None
+        );
+        // Vertical stacking: down without wrap, and distance beats iteration
+        // order when two candidates share the origin column.
+        let stack = [(200.0, 100.0), (200.0, 500.0), (200.0, 300.0)];
+        assert_eq!(
+            nearest_center_in_direction(&stack, (200.0, 200.0), FocusDirection::Down),
+            Some(2)
+        );
+        assert_eq!(
+            nearest_center_in_direction(&stack, (200.0, 600.0), FocusDirection::Down),
+            None,
+            "no wrap-off-screen candidates"
+        );
+        // Same-distance candidates keep the iteration order.
+        let tie = [(100.0, 200.0), (500.0, 200.0)];
+        assert_eq!(
+            nearest_center_in_direction(&tie, (300.0, 200.0), FocusDirection::Right),
+            Some(1)
+        );
+        assert_eq!(
+            nearest_center_in_direction(&tie, (0.0, 200.0), FocusDirection::Right),
+            Some(0)
+        );
     }
 }
 

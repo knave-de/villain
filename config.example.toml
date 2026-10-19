@@ -3,11 +3,18 @@
 [compositor]
 
 modkey = "Alt"
+# Order focus-switching shortcuts cycle a workspace's windows in:
+# "layout" walks master then stack top to bottom, "mru" walks
+# most-recently-focused windows first.
+focus_cycle_order = "layout"
 environment_file = "environment"
 
 [compositor.input]
 tap_to_click = true
 natural_scroll = true
+# Focus the window under the pointer while it moves. Set to false to
+# switch window focus on click only.
+focus_follows_mouse = true
 
 # Each entry overrides the default binding with the same keys; unmentioned
 # defaults stay active and other entries are additions.

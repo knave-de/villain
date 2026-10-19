@@ -108,7 +108,31 @@ selected. Workspace switches, minimization, and closure also restore visible
 window focus. Keyboard-interactive shell surfaces such as overview and launchers
 can take focus; empty workspaces, fully minimized workspaces, host focus loss,
 and suspended TTY sessions can have no focused window. Shortcut-driven focus
-changes wait until compositor-intercepted keys are released.
+changes apply immediately, including each Tab press while MOD stays held.
+Intercepted modifier releases update the focused client to prevent stuck modifiers.
+
+`MOD+Tab` cycles focus across the workspace's windows, and `MOD+Shift+Tab`
+walks the cycle backwards. Both wrap. The walk order comes from
+`compositor.focus_cycle_order` in Knave's configuration: `layout` walks the
+master, then the stack top to bottom, and `mru` walks windows from most
+recently focused down. Cycle steps do not rewrite the recency order, so
+repeated presses keep walking one order instead of bouncing between the two
+most recent windows. Minimized windows and dialogs hidden behind a minimized
+window are skipped. If the focused window is maximized or fullscreen, cycling
+away leaves the overlay, un-maximizes it and focuses the target, so the
+shortcut never selects a window that stays invisible behind the overlay.
+
+`MOD+H/J/K/L` move focus to the nearest window in that direction across the
+workspace layout; a missing neighbor keeps focus. Distance ties resolve by
+layout order. Floating windows participate.
+
+```toml
+[compositor]
+focus_cycle_order = "layout" # or "mru"
+
+[compositor.input]
+focus_follows_mouse = true # false switches focus on click only
+```
 
 ## Maximize and restore
 

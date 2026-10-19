@@ -4,11 +4,15 @@ use std::collections::HashSet;
 
 use smithay::{
     backend::input::{InputBackend, KeyState, KeyboardKeyEvent},
-    input::keyboard::{FilterResult, Keysym, keysyms, xkb},
+    input::keyboard::{FilterResult, KeyboardTarget, Keycode, Keysym, keysyms, xkb},
     utils::SERIAL_COUNTER,
 };
 
-use crate::{config::BindSpec, dispatch::Dispatch, state::Villain};
+use crate::{
+    config::BindSpec,
+    dispatch::{Dispatch, FocusCycleStep, FocusDirection},
+    state::Villain,
+};
 
 #[derive(Clone, Debug, PartialEq)]
 enum KeyboardAction {
@@ -94,6 +98,12 @@ impl KeybindRegistry {
             spec("MOD+SHIFT+PRINT", "screenshot", &["window", "clipboard"]),
             spec("MOD+M", "minimize", &[]),
             spec("MOD+SHIFT+M", "restore-minimized", &[]),
+            spec("MOD+H", "focus-left", &[]),
+            spec("MOD+L", "focus-right", &[]),
+            spec("MOD+K", "focus-up", &[]),
+            spec("MOD+J", "focus-down", &[]),
+            spec("MOD+TAB", "focus-next", &[]),
+            spec("MOD+SHIFT+TAB", "focus-previous", &[]),
             spec("MOD+LEFT", "previous-workspace", &[]),
             spec("MOD+RIGHT", "next-workspace", &[]),
         ];
@@ -171,7 +181,10 @@ impl KeybindRegistry {
 impl BindingKey {
     fn matches(self, raw_syms: &[Keysym]) -> bool {
         raw_syms.iter().any(|symbol| match self {
-            Self::Keysym(expected) => symbol.raw() == expected,
+            Self::Keysym(expected) => {
+                symbol.raw() == expected
+                    || (expected == keysyms::KEY_Tab && symbol.raw() == keysyms::KEY_ISO_Left_Tab)
+            }
             Self::Modifier(Modkey::Alt) => {
                 matches!(symbol.raw(), keysyms::KEY_Alt_L | keysyms::KEY_Alt_R)
             }
@@ -299,6 +312,20 @@ fn parse_dispatch(spec: &BindSpec) -> Result<Dispatch, String> {
         "restore-minimized" if spec.args.is_empty() => Ok(Dispatch::RestoreLastMinimized),
         "previous-workspace" if spec.args.is_empty() => Ok(Dispatch::PreviousWorkspace),
         "next-workspace" if spec.args.is_empty() => Ok(Dispatch::NextWorkspace),
+        "focus-next" | "focus-previous" if spec.args.is_empty() => {
+            Ok(Dispatch::FocusCycle(match spec.dispatch.as_str() {
+                "focus-next" => FocusCycleStep::Next,
+                _ => FocusCycleStep::Previous,
+            }))
+        }
+        "focus-left" | "focus-right" | "focus-up" | "focus-down" if spec.args.is_empty() => {
+            Ok(Dispatch::FocusDirection(match spec.dispatch.as_str() {
+                "focus-left" => FocusDirection::Left,
+                "focus-right" => FocusDirection::Right,
+                "focus-up" => FocusDirection::Up,
+                _ => FocusDirection::Down,
+            }))
+        }
         "quit" if spec.args.is_empty() => Ok(Dispatch::Quit),
         "toggle-overview" if spec.args.is_empty() => Ok(Dispatch::ToggleOverview),
         // Keep user configurations that copied the former default from creating
@@ -316,7 +343,8 @@ fn parse_dispatch(spec: &BindSpec) -> Result<Dispatch, String> {
         }
         "maximize" | "unmaximize" | "toggle-maximize" | "close" | "minimize"
         | "restore-minimized" | "previous-workspace" | "next-workspace" | "quit"
-        | "toggle-overview" => Err("dispatch does not accept arguments".into()),
+        | "toggle-overview" | "focus-next" | "focus-previous" | "focus-left" | "focus-right"
+        | "focus-up" | "focus-down" => Err("dispatch does not accept arguments".into()),
         "exec" => Err("exec requires a program in args".into()),
         "workspace" => Err("workspace requires exactly one argument".into()),
         dispatch => Err(format!("unknown dispatch {dispatch:?}")),
@@ -327,16 +355,20 @@ pub fn handle_keyboard_event<B: InputBackend>(
     state: &mut Villain,
     event: impl KeyboardKeyEvent<B>,
 ) {
-    let code = event.key_code();
-    let pressed = event.state() == KeyState::Pressed;
+    handle_keyboard_key(state, event.key_code(), event.state(), event.time_msec());
+}
+
+pub(crate) fn handle_keyboard_key(
+    state: &mut Villain,
+    code: Keycode,
+    key_state: KeyState,
+    time: u32,
+) {
+    let pressed = key_state == KeyState::Pressed;
     let keyboard = state.keyboard.clone();
-    let action = keyboard.input(
-        state,
-        code,
-        event.state(),
-        SERIAL_COUNTER.next_serial(),
-        event.time_msec(),
-        |state, mods, key| {
+    let serial = SERIAL_COUNTER.next_serial();
+    let (result, mods_changed) =
+        keyboard.input_intercept(state, code, key_state, |state, mods, key| {
             if !pressed
                 && state
                     .pending_modifier
@@ -429,9 +461,27 @@ pub fn handle_keyboard_event<B: InputBackend>(
                 return FilterResult::Intercept(Some(KeyboardAction::Dispatch(action)));
             }
             FilterResult::Forward
-        },
-    );
-    match action.flatten() {
+        });
+    let action = match result {
+        FilterResult::Forward => {
+            keyboard.input_forward(state, code, key_state, serial, time, mods_changed);
+            None
+        }
+        FilterResult::Intercept(action) => {
+            // Intercepting a key also skips Smithay's modifier delivery. A
+            // client entered while MOD is held must still see its release.
+            if mods_changed && let Some(focus) = keyboard.current_focus() {
+                focus.modifiers(
+                    &state.seat.clone(),
+                    state,
+                    keyboard.modifier_state(),
+                    serial,
+                );
+            }
+            action
+        }
+    };
+    match action {
         Some(KeyboardAction::Dispatch(dispatch)) => {
             if let Err(error) = state.dispatch(dispatch) {
                 tracing::debug!(%error, "keybind dispatch had no effect");
@@ -447,7 +497,6 @@ pub fn handle_keyboard_event<B: InputBackend>(
         }
         None => {}
     }
-    state.flush_pending_focus();
 }
 
 #[cfg(test)]
@@ -534,6 +583,47 @@ mod tests {
                 KeybindRegistry::from_specs("Super", &[spec("MOD+F", name, &["unexpected"])])
                     .is_err()
             );
+        }
+    }
+
+    #[test]
+    fn focus_switch_bindings_resolve_names_and_reject_arguments() {
+        let registry = KeybindRegistry::defaults("Super").unwrap();
+        let keys = |sym| [Keysym::new(sym)];
+        assert_eq!(
+            registry.find(&keys(keysyms::KEY_Tab), false, false, false, true),
+            Some(Dispatch::FocusCycle(FocusCycleStep::Next))
+        );
+        assert_eq!(
+            registry.find(&keys(keysyms::KEY_Tab), false, false, true, true),
+            Some(Dispatch::FocusCycle(FocusCycleStep::Previous))
+        );
+        assert_eq!(
+            registry.find(&keys(keysyms::KEY_ISO_Left_Tab), false, false, true, true),
+            Some(Dispatch::FocusCycle(FocusCycleStep::Previous))
+        );
+        assert_eq!(
+            registry.find(&keys(keysyms::KEY_h), false, false, false, true),
+            Some(Dispatch::FocusDirection(FocusDirection::Left))
+        );
+        assert_eq!(
+            registry.find(&keys(keysyms::KEY_j), false, false, false, true),
+            Some(Dispatch::FocusDirection(FocusDirection::Down))
+        );
+        assert_eq!(
+            registry.find(&keys(keysyms::KEY_k), false, false, false, true),
+            Some(Dispatch::FocusDirection(FocusDirection::Up))
+        );
+        assert_eq!(
+            registry.find(&keys(keysyms::KEY_l), false, false, false, true),
+            Some(Dispatch::FocusDirection(FocusDirection::Right))
+        );
+        for (keys, dispatch) in [
+            ("MOD+TAB", "focus-next"),
+            ("MOD+SHIFT+TAB", "focus-previous"),
+            ("MOD+L", "focus-right"),
+        ] {
+            assert!(parse_dispatch(&spec(keys, dispatch, &["extra"])).is_err());
         }
     }
 
