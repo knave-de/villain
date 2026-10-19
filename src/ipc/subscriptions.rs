@@ -1,6 +1,7 @@
 //! Replacement snapshots with one pending frame per subscriber.
 use knave_desktop_api::{
-    DesktopError, DesktopErrorCode, DesktopResponse, DesktopSnapshot, MAX_SNAPSHOT_FRAME_BYTES,
+    DesktopError, DesktopErrorCode, DesktopEvent, DesktopResponse, DesktopSnapshot,
+    MAX_SNAPSHOT_FRAME_BYTES,
 };
 use std::{
     io::{self, Read, Write},
@@ -11,6 +12,7 @@ use std::{
 type Frame = Arc<[u8]>;
 pub(super) struct Subscriber {
     latest: Mutex<Option<Frame>>,
+    event: Mutex<Option<Frame>>,
     wake: UnixStream,
 }
 impl Subscriber {
@@ -21,21 +23,34 @@ impl Subscriber {
         Ok((
             Arc::new(Self {
                 latest: Mutex::new(None),
+                event: Mutex::new(None),
                 wake,
             }),
             reader,
         ))
     }
+    fn wake(&self) -> bool {
+        match (&self.wake).write(&[1]) {
+            Ok(_) => true,
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => true,
+            Err(_) => false,
+        }
+    }
     fn publish(&self, frame: Frame) -> bool {
         let mut slot = self.latest.lock().unwrap();
         let notify = slot.is_none();
         *slot = Some(frame);
-        if notify {
-            match (&self.wake).write(&[1]) {
-                Ok(_) => {}
-                Err(error) if error.kind() == io::ErrorKind::WouldBlock => {}
-                Err(_) => return false,
-            }
+        if notify && !self.wake() {
+            return false;
+        }
+        true
+    }
+    fn publish_event(&self, frame: Frame) -> bool {
+        let mut slot = self.event.lock().unwrap();
+        let notify = slot.is_none();
+        *slot = Some(frame);
+        if notify && !self.wake() {
+            return false;
         }
         true
     }
@@ -70,6 +85,30 @@ impl Subscriptions {
             subscriber
                 .upgrade()
                 .is_some_and(|s| s.publish(frame.clone()))
+        });
+    }
+    pub(super) fn publish_event(&mut self, event: DesktopEvent) {
+        self.subscribers
+            .retain(|subscriber| subscriber.strong_count() > 0);
+        if self.subscribers.is_empty() {
+            return;
+        }
+        let mut frame =
+            serde_json::to_vec(&DesktopResponse::Event(event)).expect("event serializes");
+        if frame.len() as u64 >= MAX_SNAPSHOT_FRAME_BYTES {
+            frame = serde_json::to_vec(&DesktopResponse::Error(DesktopError {
+                code: DesktopErrorCode::Unavailable,
+                message: "Desktop event exceeds subscription capacity".into(),
+                retryable: false,
+            }))
+            .expect("error serializes");
+        }
+        frame.push(b'\n');
+        let frame: Frame = frame.into();
+        self.subscribers.retain(|subscriber| {
+            subscriber
+                .upgrade()
+                .is_some_and(|s| s.publish_event(frame.clone()))
         });
     }
     pub(super) fn subscribe(&mut self, subscriber: &Arc<Subscriber>) {
@@ -140,8 +179,10 @@ pub(super) fn serve(
                 Err(error) => return Err(error),
             }
         }
-        let frame = subscriber.latest.lock().unwrap().take();
-        if let Some(frame) = frame {
+        let snapshot_frame = subscriber.latest.lock().unwrap().take();
+        let event_frame = subscriber.event.lock().unwrap().take();
+        let frames = snapshot_frame.into_iter().chain(event_frame);
+        for frame in frames {
             stream.write_all(&frame)?;
         }
     }
@@ -150,6 +191,84 @@ pub(super) fn serve(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn reloaded_frame(frame: &Frame) -> DesktopResponse {
+        match serde_json::from_slice(frame).unwrap() {
+            response @ DesktopResponse::Event(_) => response,
+            other => panic!("expected an event frame: {other:?}"),
+        }
+    }
+
+    fn drain_wake(wake: &mut UnixStream) -> io::Result<usize> {
+        let mut bytes = [0; 64];
+        match wake.read(&mut bytes) {
+            Ok(n) => Ok(n),
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => Ok(0),
+            Err(error) => Err(error),
+        }
+    }
+
+    #[test]
+    fn event_publication_wakes_and_coalesces_pending_events() {
+        let mut subscriptions = Subscriptions::default();
+        let (subscriber, mut wake) = Subscriber::new().unwrap();
+        subscriptions.subscribe(&subscriber);
+
+        subscriptions.publish_event(DesktopEvent::ConfigurationReloaded);
+        assert_eq!(drain_wake(&mut wake).unwrap(), 1);
+        // An unread event is replaced rather than queued twice.
+        subscriptions.publish_event(DesktopEvent::ConfigurationReloaded);
+        assert_eq!(drain_wake(&mut wake).unwrap(), 0);
+        assert_eq!(
+            reloaded_frame(
+                &subscriber
+                    .event
+                    .lock()
+                    .unwrap()
+                    .take()
+                    .expect("event frame pending")
+            ),
+            DesktopResponse::Event(DesktopEvent::ConfigurationReloaded)
+        );
+        // Publication with no subscribers does nothing and must not panic.
+        drop(subscriber);
+        let mut empty = Subscriptions::default();
+        empty.publish_event(DesktopEvent::ConfigurationReloaded);
+    }
+
+    #[test]
+    fn snapshot_and_event_frames_are_delivered_once_each() {
+        let mut subscriptions = Subscriptions::default();
+        let snapshot = DesktopSnapshot {
+            generation: 1,
+            overview_visible: false,
+            workspaces: Vec::new(),
+            windows: Vec::new(),
+        };
+        let (subscriber, mut wake) = Subscriber::new().unwrap();
+        subscriptions.subscribe(&subscriber);
+        subscriptions.publish(snapshot.clone());
+        let _wake_held = &mut wake;
+
+        subscriptions.publish_event(DesktopEvent::ConfigurationReloaded);
+        let frames = subscriber
+            .latest
+            .lock()
+            .unwrap()
+            .take()
+            .into_iter()
+            .chain(subscriber.event.lock().unwrap().take())
+            .collect::<Vec<_>>();
+        assert_eq!(frames.len(), 2);
+        assert!(matches!(
+            serde_json::from_slice::<DesktopResponse>(&frames[0]).unwrap(),
+            DesktopResponse::Snapshot(_)
+        ));
+        assert_eq!(
+            reloaded_frame(&frames[1]),
+            DesktopResponse::Event(DesktopEvent::ConfigurationReloaded)
+        );
+    }
 
     #[test]
     fn visibility_only_changes_publish_and_wake_subscribers() {
