@@ -18,7 +18,7 @@ use smithay::{
                 AsRenderElements, Element, Id, Kind,
                 surface::{WaylandSurfaceRenderElement, render_elements_from_surface_tree},
                 texture::{TextureBuffer, TextureRenderElement},
-                utils::{Relocate, RelocateRenderElement},
+                utils::{CropRenderElement, Relocate, RelocateRenderElement},
             },
             gles::{
                 GlesError, GlesPixelProgram, GlesRenderer, GlesTexProgram, GlesTexture, Uniform,
@@ -37,6 +37,7 @@ use std::collections::VecDeque;
 smithay::backend::renderer::element::render_elements! {
     pub EffectElement<=GlesRenderer>;
     Surface=WaylandSurfaceRenderElement<GlesRenderer>,
+    CroppedSurface=CropRenderElement<WaylandSurfaceRenderElement<GlesRenderer>>,
     Shape=PixelShaderElement,
     Texture=TextureRenderElement<GlesTexture>,
     Filter=TextureShaderElement,
@@ -113,6 +114,56 @@ struct CachedPane {
 }
 const MAX_PIXELS: i64 = 36 * 1024 * 1024;
 
+// Clip root/subsurface content even when visual effects are disabled. Resize
+// configures are asynchronous, and clients may keep buffers larger than a tile.
+fn window_elements(
+    window: &smithay::desktop::Window,
+    renderer: &mut GlesRenderer,
+    rect: Geometry,
+    clip: bool,
+) -> Vec<EffectElement> {
+    if !clip {
+        let elements: Vec<WaylandSurfaceRenderElement<GlesRenderer>> = window.render_elements(
+            renderer,
+            (rect.loc - window.geometry().loc).to_physical_precise_round(1.0),
+            Scale::from(1.0),
+            1.0,
+        );
+        return elements.into_iter().map(EffectElement::Surface).collect();
+    }
+    let Some(root) = window.wl_surface() else {
+        return Vec::new();
+    };
+    let mut elements = Vec::new();
+    // Menus and tooltips are separate surface trees and keep their own bounds.
+    for (popup, location) in PopupManager::popups_for_surface(&root) {
+        let popup_elements: Vec<WaylandSurfaceRenderElement<GlesRenderer>> =
+            render_elements_from_surface_tree(
+                renderer,
+                popup.wl_surface(),
+                (rect.loc + location - popup.geometry().loc).to_physical_precise_round(1.0),
+                Scale::from(1.0),
+                1.0,
+                Kind::Unspecified,
+            );
+        elements.extend(popup_elements.into_iter().map(EffectElement::Surface));
+    }
+    let root_elements: Vec<WaylandSurfaceRenderElement<GlesRenderer>> =
+        render_elements_from_surface_tree(
+            renderer,
+            &root,
+            (rect.loc - window.geometry().loc).to_physical_precise_round(1.0),
+            Scale::from(1.0),
+            1.0,
+            Kind::Unspecified,
+        );
+    elements.extend(root_elements.into_iter().filter_map(|element| {
+        CropRenderElement::from_element(element, 1.0, rect.to_physical_precise_round(1.0))
+            .map(EffectElement::CroppedSurface)
+    }));
+    elements
+}
+
 impl EffectsRenderer {
     pub(crate) fn clear(&mut self) {
         self.scenes.clear();
@@ -182,12 +233,8 @@ impl EffectsRenderer {
             let is_focused = KeyboardFocus::for_window(window) == focused;
             key.windows
                 .push((*rect, *fullscreen, *maximized, *tiled, is_focused));
-            let elements: Vec<WaylandSurfaceRenderElement<GlesRenderer>> = window.render_elements(
-                renderer,
-                (rect.loc - window.geometry().loc).to_physical_precise_round(1.0),
-                Scale::from(1.0),
-                1.0,
-            );
+            let elements =
+                window_elements(window, renderer, *rect, *tiled || *fullscreen || *maximized);
             key.sources.extend(elements.iter().map(source_key));
             sources.push(elements);
         }
@@ -245,7 +292,7 @@ impl EffectsRenderer {
             self.scenes
                 .retain(|entry| entry.key.workspace != workspace || entry.key.layers != layers);
             for source in sources {
-                lower.splice(0..0, source.into_iter().map(EffectElement::Surface));
+                lower.splice(0..0, source);
             }
             unmanaged.extend(lower);
             upper.extend(unmanaged);
@@ -373,7 +420,7 @@ impl EffectsRenderer {
                     }
                 }
             } else {
-                window_elements.extend(original.into_iter().map(EffectElement::Surface));
+                window_elements.extend(original);
             }
             if widths != Edges::default() {
                 window_elements.push(EffectElement::Shape(border(

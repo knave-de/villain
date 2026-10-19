@@ -36,6 +36,11 @@ recomputes geometry. Keyboard focus requests repaint without requiring a client
 commit. Both nested and direct backends, previews and Overview panes share one
 GLES effects pipeline. Layer surfaces and unmanaged X11 surfaces keep their policy.
 Border clicks focus without forwarding input; clipped content corners reject input.
+Tiled, maximized and fullscreen root/subsurface content is cropped to its assigned
+client rectangle, including while a resize is pending or a client retains an
+oversized buffer. Pointer hit testing uses the same rectangle. Popups keep their
+own bounds; ordinary floating windows retain their client geometry. With effects
+disabled, Smithay crop elements avoid allocating offscreen textures.
 
 Disabled effects retain imported surfaces and Smithay incremental damage.
 Enabled effects cache completed scenes using source identity, damage commit,

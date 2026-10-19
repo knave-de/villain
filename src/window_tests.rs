@@ -746,3 +746,6 @@ fn wayland_floating_and_fullscreen_requests() {
     }
     thread.join().unwrap();
 }
+
+#[path = "tile_tests.rs"]
+mod tile_tests;

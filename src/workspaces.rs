@@ -1472,6 +1472,8 @@ impl Villain {
     }
 
     fn input_window_at_pointer(&self) -> Option<(Window, Point<i32, smithay::utils::Logical>)> {
+        // Match rendered bounds while a client retains an old or oversized buffer.
+        let layout = self.workspace_layout(self.active_workspace);
         for window in self.space.elements().rev() {
             let location = self.space.element_location(window)?;
             let origin = location - window.geometry().loc;
@@ -1481,7 +1483,11 @@ impl Villain {
             ) else {
                 continue;
             };
-            let rect = Geometry::new(location, window.geometry().size);
+            let rect = layout
+                .iter()
+                .find(|entry| entry.0 == *window && (entry.2 || entry.3 || entry.4))
+                .map(|entry| entry.1)
+                .unwrap_or_else(|| Geometry::new(location, window.geometry().size));
             let root =
                 std::iter::successors(Some(surface), smithay::wayland::compositor::get_parent)
                     .last();
@@ -1497,9 +1503,14 @@ impl Villain {
     }
 
     fn border_window_at_pointer(&self) -> Option<(Window, Point<i32, smithay::utils::Logical>)> {
+        let layout = self.workspace_layout(self.active_workspace);
         for window in self.space.elements().rev() {
             let location = self.space.element_location(window)?;
-            let rect = Geometry::new(location, window.geometry().size);
+            let rect = layout
+                .iter()
+                .find(|entry| entry.0 == *window && (entry.2 || entry.3 || entry.4))
+                .map(|entry| entry.1)
+                .unwrap_or_else(|| Geometry::new(location, window.geometry().size));
             let (outer, radii, _) = self.input_shape(window, rect);
             if !rect.to_f64().contains(self.pointer_location)
                 && crate::appearance::rounded_contains(outer, radii, self.pointer_location)
