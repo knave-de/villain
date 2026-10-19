@@ -284,36 +284,32 @@ mod tests {
         let path = directory.join("config.toml");
         fs::write(
             &path,
-            "schema_version = 1\n[compositor]\nmodkey = \"Alt\"\n[compositor.input]\ntap_to_click = false\nnatural_scroll = false\n",
+            "[compositor]\nmodkey = \"Alt\"\n[compositor.input]\ntap_to_click = false\nnatural_scroll = false\n",
         )
         .unwrap();
         let current = RuntimeConfig::load_from(path.clone()).unwrap();
         assert!(!current.input.tap_to_click);
         assert!(!current.input.natural_scroll);
 
-        fs::write(
-            &path,
-            "schema_version = 1\n[compositor]\nmodkey = \"Invalid\"\n",
-        )
-        .unwrap();
+        fs::write(&path, "[compositor]\nmodkey = \"Invalid\"\n").unwrap();
         assert!(current.reload().is_err());
         assert!(!current.input.tap_to_click);
         fs::remove_dir_all(directory).unwrap();
     }
     #[test]
-    fn root_settings_are_projected_by_knave() {
+    fn compositor_settings_are_projected_by_knave() {
         let directory =
-            std::env::temp_dir().join(format!("villain-root-config-{}", std::process::id()));
+            std::env::temp_dir().join(format!("villain-compositor-config-{}", std::process::id()));
         fs::create_dir_all(&directory).unwrap();
         let path = directory.join("config.toml");
         fs::write(
             &path,
-            r#"schema_version = 1
+            r#"[compositor]
 modkey = "Alt"
-[input]
+[compositor.input]
 tap_to_click = false
 natural_scroll = false
-[[bind]]
+[[compositor.bind]]
 keys = "MOD+Q"
 dispatch = "close"
 "#,
@@ -334,8 +330,7 @@ dispatch = "close"
         let path = directory.join("config.toml");
         fs::write(
             &path,
-            r#"schema_version = 2
-[compositor]
+            r#"[compositor]
 modkey = "Super"
 
 [[compositor.device]]
