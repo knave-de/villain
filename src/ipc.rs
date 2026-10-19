@@ -23,8 +23,8 @@ use std::{
 
 use base64::Engine;
 use knave_desktop_api::{
-    DesktopError, DesktopErrorCode, DesktopQuery, DesktopRequest, DesktopResponse, DesktopSnapshot,
-    OverviewPane, WorkspaceId, WorkspacePreview, socket_path_for_display,
+    DesktopError, DesktopErrorCode, DesktopEvent, DesktopQuery, DesktopRequest, DesktopResponse,
+    DesktopSnapshot, OverviewPane, WorkspaceId, WorkspacePreview, socket_path_for_display,
 };
 use smithay::reexports::calloop::{
     EventLoop, Interest, LoopHandle, Mode, PostAction, RegistrationToken, channel, generic::Generic,
@@ -354,6 +354,15 @@ fn dispatch_error(error: DispatchError) -> DesktopResponse {
 }
 
 impl Villain {
+    /// Notifies subscribers that a configuration reload completed. Emitted
+    /// after the revalidated settings are applied so reactions observe
+    /// consistent state.
+    pub(crate) fn publish_reload_event(&mut self) {
+        self.ipc_server
+            .subscriptions
+            .publish_event(DesktopEvent::ConfigurationReloaded);
+    }
+
     pub(crate) fn publish_desktop_state(&mut self) {
         if !self.desktop_state_dirty && self.ipc_server.subscriptions.snapshot.is_some() {
             return;

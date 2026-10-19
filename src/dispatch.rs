@@ -112,6 +112,7 @@ impl Villain {
                     crate::session::activate(self, false);
                 }
                 self.apply_input_config();
+                self.publish_reload_event();
                 tracing::info!("configuration reloaded");
                 Ok(())
             }
