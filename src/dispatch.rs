@@ -4,7 +4,7 @@ use std::{fmt, io};
 
 use knave_desktop_api::{DesktopCommand, WindowId};
 
-use crate::state::Villain;
+use crate::{state::Villain, workspace_navigation::Direction};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Dispatch {
@@ -155,13 +155,18 @@ impl Villain {
                 Ok(())
             }
             Dispatch::PreviousWorkspace => {
-                self.switch_workspace(
-                    (self.active_workspace + self.workspaces.len() - 1) % self.workspaces.len(),
-                );
+                if let Some(target) =
+                    self.workspace_target(self.active_workspace, Direction::Previous)
+                {
+                    self.switch_workspace(target);
+                }
                 Ok(())
             }
             Dispatch::NextWorkspace => {
-                self.switch_workspace((self.active_workspace + 1) % self.workspaces.len());
+                if let Some(target) = self.workspace_target(self.active_workspace, Direction::Next)
+                {
+                    self.switch_workspace(target);
+                }
                 Ok(())
             }
             Dispatch::FocusWindow(window) => match self.focus_window(window) {

@@ -30,6 +30,7 @@ mod split_grab;
 mod state;
 mod tty;
 mod window_grab;
+mod workspace_navigation;
 mod workspaces;
 mod xwayland;
 

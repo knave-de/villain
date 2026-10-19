@@ -820,3 +820,6 @@ fn wayland_floating_and_fullscreen_requests() {
 
 #[path = "tile_tests.rs"]
 mod tile_tests;
+
+#[path = "workspace_navigation_tests.rs"]
+mod workspace_navigation_tests;
