@@ -79,12 +79,10 @@ impl RuntimeConfig {
                 args: binding.args.clone(),
             })
             .collect();
-        let keybinds = if bindings.is_empty() {
-            KeybindRegistry::defaults(&compositor.modkey)
-        } else {
-            KeybindRegistry::from_specs(&compositor.modkey, &bindings)
-        }
-        .map_err(ConfigError)?;
+        // Explicit bindings override matching defaults in place; other
+        // defaults stay active so one custom binding keeps the rest of the set.
+        let keybinds =
+            KeybindRegistry::with_overrides(&compositor.modkey, &bindings).map_err(ConfigError)?;
 
         let mut environment = default_environment();
         let default_environment_path = path
@@ -319,6 +317,48 @@ dispatch = "close"
         let config = RuntimeConfig::load_from(path).unwrap();
         assert!(!config.input.tap_to_click);
         assert!(!config.input.natural_scroll);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn explicit_bindings_override_matches_and_keep_other_defaults() {
+        use crate::dispatch::Dispatch;
+        use smithay::input::keyboard::{Keysym, keysyms};
+
+        let directory =
+            std::env::temp_dir().join(format!("villain-keybind-config-{}", std::process::id()));
+        fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("config.toml");
+        fs::write(
+            &path,
+            r#"[compositor]
+modkey = "Super"
+
+[[compositor.bind]]
+keys = "MOD+Q"
+dispatch = "exec"
+args = ["bemenu"]
+"#,
+        )
+        .unwrap();
+
+        let config = RuntimeConfig::load_from(path).unwrap();
+        let q = [Keysym::new(keysyms::KEY_q)];
+        assert_eq!(
+            config.keybinds.find(&q, false, false, false, true),
+            Some(Dispatch::Spawn(vec!["bemenu".into()]))
+        );
+        // An unmentioned default binding survives the override.
+        assert_eq!(
+            config.keybinds.find(
+                &[Keysym::new(keysyms::KEY_Return)],
+                false,
+                false,
+                false,
+                true,
+            ),
+            Some(Dispatch::Spawn(vec!["kitty".into()]))
+        );
         fs::remove_dir_all(directory).unwrap();
     }
 
