@@ -873,6 +873,7 @@ impl Villain {
         if index >= self.workspaces.len() {
             return;
         }
+        self.cancel_swipe(0);
         self.remember_current_window_focus();
         if !self
             .pointer

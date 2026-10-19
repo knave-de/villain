@@ -33,6 +33,7 @@ pub struct RuntimeConfig {
     /// Ordered `[[compositor.device]]` rules; later matches override earlier ones.
     pub devices: Vec<knave_config::CompositorDeviceConfig>,
     pub keybinds: KeybindRegistry,
+    pub gestures: Vec<knave_config::gesture::GestureBinding>,
     pub environment: BTreeMap<String, String>,
     path: PathBuf,
 }
@@ -112,6 +113,7 @@ impl RuntimeConfig {
                 natural_scroll: compositor.input.natural_scroll,
             },
             devices: compositor.device.clone(),
+            gestures: crate::gestures::bindings(&compositor.gesture),
             keybinds,
             environment,
             path,

@@ -88,6 +88,10 @@ impl CompositorHandler for Villain {
             });
         if visible_window
             || overview_window
+            || self
+                .window_for_surface(&root)
+                .and_then(|window| self.workspace_for_window(&window))
+                .is_some_and(|index| self.gestures.visible(index))
             || self.layer_surface_visible(&root)
             || self.cursor.uses_surface(&root)
         {
@@ -386,6 +390,7 @@ smithay::delegate_ext_data_control!(Villain);
 smithay::delegate_output!(Villain);
 smithay::delegate_primary_selection!(Villain);
 smithay::delegate_seat!(Villain);
+smithay::delegate_pointer_gestures!(Villain);
 smithay::delegate_shm!(Villain);
 smithay::delegate_xdg_shell!(Villain);
 

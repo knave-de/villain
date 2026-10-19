@@ -28,6 +28,7 @@ struct Configure {
 struct Client {
     configures: HashMap<usize, Configure>,
     pointer_buttons: usize,
+    swipes: Vec<String>,
 }
 impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for Client {
     fn event(
@@ -114,6 +115,32 @@ impl Dispatch<wl_pointer::WlPointer, ()> for Client {
         if matches!(event, wl_pointer::Event::Button { .. }) {
             state.pointer_buttons += 1;
         }
+    }
+}
+use wayland_protocols::wp::pointer_gestures::zv1::client::{
+    zwp_pointer_gesture_swipe_v1, zwp_pointer_gestures_v1,
+};
+delegate_noop!(Client: ignore zwp_pointer_gestures_v1::ZwpPointerGesturesV1);
+impl Dispatch<zwp_pointer_gesture_swipe_v1::ZwpPointerGestureSwipeV1, ()> for Client {
+    fn event(
+        state: &mut Self,
+        _: &zwp_pointer_gesture_swipe_v1::ZwpPointerGestureSwipeV1,
+        event: zwp_pointer_gesture_swipe_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        use zwp_pointer_gesture_swipe_v1::Event;
+        state.swipes.push(
+            match event {
+                Event::Begin { .. } => "begin",
+                Event::Update { .. } => "update",
+                Event::End { cancelled: 0, .. } => "end",
+                Event::End { .. } => "cancel",
+                _ => "other",
+            }
+            .into(),
+        );
     }
 }
 delegate_noop!(Client: ignore wl_shm::WlShm);
@@ -214,7 +241,10 @@ fn wayland_floating_and_fullscreen_requests() {
         // Attach real buffers so pointer hit testing follows the normal client path.
         let shm: wl_shm::WlShm = globals.bind(&qh, 1..=1, ()).unwrap();
         let seat: wl_seat::WlSeat = globals.bind(&qh, 1..=7, ()).unwrap();
-        let _pointer = seat.get_pointer(&qh, ());
+        let pointer = seat.get_pointer(&qh, ());
+        let gestures: zwp_pointer_gestures_v1::ZwpPointerGesturesV1 =
+            globals.bind(&qh, 1..=3, ()).unwrap();
+        let _swipe = gestures.get_swipe_gesture(&pointer, &qh, ());
         let path =
             std::env::temp_dir().join(format!("villain-split-buffer-{}", std::process::id()));
         let file = std::fs::OpenOptions::new()
@@ -232,6 +262,40 @@ fn wayland_floating_and_fullscreen_requests() {
         b.attach(Some(&buffer), 0, 0);
         b.commit();
         settle(&mut queue, &mut client);
+        inspect(&sender, |s| {
+            s.pointer_location = (100.0, 100.0).into();
+            s.refresh_pointer(0);
+            s.swipe_begin("test".into(), 4, 1);
+            s.swipe_update("test", -100.0, 0.0, 2);
+            s.swipe_end("test", false, 3);
+        });
+        settle(&mut queue, &mut client);
+        assert_eq!(client.swipes, ["begin", "update", "end"]);
+        client.swipes.clear();
+        inspect(&sender, |s| {
+            s.swipe_begin("test".into(), 3, 4);
+            s.swipe_update("test", -60.0, 0.0, 5);
+            assert_eq!(s.gestures.transition.unwrap().offset, -240.0);
+            s.swipe_end("test", true, 6);
+            assert_eq!(s.active_workspace, 0);
+            s.cancel_swipe(7);
+        });
+        settle(&mut queue, &mut client);
+        assert!(
+            client.swipes.is_empty(),
+            "reserved streams never reach the client"
+        );
+        inspect(&sender, |s| {
+            s.config.gestures[0].action = knave_config::gesture::GestureAction::None;
+            s.swipe_begin("test".into(), 3, 8);
+            s.swipe_update("test", -60.0, 0.0, 9);
+            s.cancel_swipe(10);
+            s.swipe_update("test", -60.0, 0.0, 11);
+            s.swipe_end("test", false, 12);
+            s.config.gestures[0].action = knave_config::gesture::GestureAction::Workspace;
+        });
+        settle(&mut queue, &mut client);
+        assert_eq!(client.swipes, ["begin", "update", "cancel"]);
         inspect(&sender, |s| {
             let focus = s.keyboard.current_focus();
             s.pointer_location = (2000.0, 100.0).into();
@@ -280,9 +344,24 @@ fn wayland_floating_and_fullscreen_requests() {
             s.dispatch(Dispatch::ResetMaster).unwrap();
             s.pointer_location = (402.0, 100.0).into();
             s.refresh_pointer(1);
+            s.swipe_begin("test".into(), 3, 18);
+            s.swipe_update("test", -100.0, 0.0, 19);
+            assert!(s.gestures.transition.is_some());
             s.pressed_buttons.insert(0x110);
             assert!(s.try_start_split_drag(0x110, ButtonState::Pressed, 1));
             assert!(s.pointer.current_focus().is_none());
+            s.maintain_swipe();
+            s.swipe_update("test", -100.0, 0.0, 20);
+            s.swipe_end("test", false, 21);
+            assert!(
+                s.gestures.transition.is_none(),
+                "new split grab cancels active swipe"
+            );
+            s.swipe_begin("test".into(), 3, 20);
+            s.swipe_update("test", -100.0, 0.0, 21);
+            s.swipe_end("test", false, 22);
+            assert!(s.gestures.transition.is_none(), "split grab owns input");
+            assert_eq!(s.active_workspace, 0);
             s.pointer_location = (642.0, 100.0).into();
             s.refresh_pointer(2);
             assert_eq!(s.master_ratio(0), 8000);
