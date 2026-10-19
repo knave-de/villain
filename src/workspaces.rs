@@ -915,6 +915,7 @@ impl Villain {
         if index >= self.workspaces.len() {
             return;
         }
+        self.pending_focus_window = None;
         self.cancel_swipe(0);
         self.remember_current_window_focus();
         if !self
@@ -1493,12 +1494,14 @@ impl Villain {
             // the shortcut is released and the keyboard state is neutral.
             if !self.suppressed_keys.is_empty() {
                 self.pending_focus_restore = true;
+                self.pending_focus_window = Some((id, remember));
                 return true;
             }
             self.keyboard
                 .clone()
                 .set_focus(self, Some(surface), SERIAL_COUNTER.next_serial());
             self.pending_focus_restore = false;
+            self.pending_focus_window = None;
         }
         true
     }
@@ -1516,6 +1519,7 @@ impl Villain {
         }
         if !self.suppressed_keys.is_empty() {
             self.pending_focus_restore = true;
+            self.pending_focus_window = None;
             return;
         }
         if let Some(window) = self.last_visible_window(self.active_workspace) {
@@ -1525,6 +1529,7 @@ impl Villain {
                 .clone()
                 .set_focus(self, None, SERIAL_COUNTER.next_serial());
             self.pending_focus_restore = false;
+            self.pending_focus_window = None;
         }
     }
 
@@ -1535,7 +1540,20 @@ impl Villain {
             && self.host_focused
             && !self.keyboard.is_grabbed()
         {
+            let index = self.active_workspace;
+            let pending = self.pending_focus_window.take();
             self.pending_focus_restore = false;
+            if let Some((id, remember)) = pending
+                && self.window_is_visible(index, id)
+                && let Some(window) = self.workspaces[index]
+                    .windows
+                    .iter()
+                    .find(|entry| entry.id == id)
+                    .map(|entry| entry.window.clone())
+                && self.apply_managed_focus(&window, remember)
+            {
+                return;
+            }
             self.restore_active_workspace_focus_inner(true);
         }
     }

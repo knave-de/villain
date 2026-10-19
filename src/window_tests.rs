@@ -330,7 +330,16 @@ fn wayland_floating_and_fullscreen_requests() {
                 "window clicks still change focus"
             );
             s.focus_window(find(s, "other").id);
-            use crate::dispatch::Dispatch;
+            use crate::dispatch::{Dispatch, FocusCycleStep};
+            let primary = find(s, "primary").id;
+            s.suppressed_keys
+                .insert(smithay::input::keyboard::Keycode::new(125));
+            s.cycle_focus(FocusCycleStep::Next);
+            assert_eq!(s.pending_focus_window, Some((primary, false)));
+            assert!(find(s, "other").focused);
+            s.suppressed_keys.clear();
+            s.flush_pending_focus();
+            assert!(find(s, "primary").focused);
             use smithay::backend::input::ButtonState;
             let focus = s.keyboard.current_focus();
             s.dispatch(Dispatch::ResizeMaster(10)).unwrap();
