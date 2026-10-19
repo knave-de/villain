@@ -1,0 +1,183 @@
+//! Real managed windows exercise the shared navigation and swipe target contract.
+use super::*;
+use crate::{dispatch::Dispatch as Action, workspace_navigation::Direction};
+
+#[test]
+#[ignore = "requires private Unix sockets and an isolated XDG_RUNTIME_DIR"]
+fn sparse_navigation_and_preview_lifecycle() {
+    let mut event_loop = EventLoop::try_new().unwrap();
+    let mut state = Villain::new(
+        &mut event_loop,
+        Display::new().unwrap(),
+        crate::config::RuntimeConfig::load().unwrap(),
+    );
+    let (server, client) = UnixStream::pair().unwrap();
+    state
+        .display_handle
+        .insert_client(server, Arc::new(crate::state::ClientState::default()))
+        .unwrap();
+    let (sender, requests) = mpsc::channel::<Inspect>();
+    let thread = std::thread::spawn(move || {
+        let conn = Connection::from_socket(client).unwrap();
+        let (globals, mut queue) = registry_queue_init::<Client>(&conn).unwrap();
+        let qh = queue.handle();
+        let compositor: wl_compositor::WlCompositor = globals.bind(&qh, 1..=4, ()).unwrap();
+        let wm: xdg_wm_base::XdgWmBase = globals.bind(&qh, 1..=6, ()).unwrap();
+        let mut client = Client::default();
+        let mut windows = Vec::new();
+        for (index, workspace) in [0, 3, 6].into_iter().enumerate() {
+            inspect(&sender, move |state| state.switch_workspace(workspace));
+            let surface = compositor.create_surface(&qh, ());
+            let xdg = wm.get_xdg_surface(&surface, &qh, ());
+            let top = xdg.get_toplevel(&qh, index);
+            top.set_app_id(format!("sparse-{workspace}"));
+            surface.commit();
+            queue.roundtrip(&mut client).unwrap();
+            queue.roundtrip(&mut client).unwrap();
+            windows.push((surface, xdg, top));
+        }
+        inspect(&sender, |state| {
+            state.switch_workspace(0);
+            state.config.workspace.skip_empty = false;
+            state.dispatch(Action::NextWorkspace).unwrap();
+            assert_eq!(state.active_workspace, 1, "default visits empty slots");
+            state.config.workspace.skip_empty = true;
+            state.dispatch(Action::NextWorkspace).unwrap();
+            assert_eq!(state.active_workspace, 3, "escape an empty source");
+            state.dispatch(Action::NextWorkspace).unwrap();
+            assert_eq!(state.active_workspace, 6);
+            state.dispatch(Action::NextWorkspace).unwrap();
+            assert_eq!(state.active_workspace, 0, "wrap sparse slots");
+            state.dispatch(Action::PreviousWorkspace).unwrap();
+            assert_eq!(state.active_workspace, 6);
+            state.dispatch(Action::FocusWorkspace(3)).unwrap();
+            assert_eq!(
+                state.active_workspace, 2,
+                "direct selection reaches empty workspace"
+            );
+            state.switch_workspace(0);
+        });
+        windows[1].2.set_minimized();
+        queue.roundtrip(&mut client).unwrap();
+        inspect(&sender, |state| {
+            assert!(find(state, "sparse-3").minimized);
+            assert_eq!(
+                state.workspace_target(0, Direction::Next),
+                Some(3),
+                "minimized-only workspace remains occupied"
+            );
+            state.dispatch(Action::NextWorkspace).unwrap();
+            assert_eq!(state.active_workspace, 3);
+            assert!(state.restore_window(find(state, "sparse-3").id));
+            state.switch_workspace(0);
+            state.swipe_begin("pad".into(), 3, 1);
+            state.swipe_update("pad", -100.0, 0.0, 2);
+            let preview = state.gestures.transition.unwrap();
+            assert_eq!((preview.target, preview.direction), (3, Direction::Next));
+            // Place a real managed window into an intervening inactive slot without
+            // explicitly switching workspaces (which intentionally cancels a swipe).
+            let entry = state.workspaces[6].windows.pop().unwrap();
+            state.workspaces[1].windows.push(entry);
+            assert_eq!(state.workspace_target(0, Direction::Next), Some(1));
+            state.swipe_update("pad", -10.0, 0.0, 3);
+            assert_eq!(
+                state.gestures.transition.unwrap().target,
+                3,
+                "preview does not retarget to a newly occupied slot"
+            );
+            state.swipe_end("pad", false, 4);
+            assert_eq!(
+                state.active_workspace, 3,
+                "release commits the previewed target"
+            );
+            let entry = state.workspaces[1].windows.pop().unwrap();
+            state.workspaces[6].windows.push(entry);
+            state.switch_workspace(0);
+            state.swipe_begin("pad".into(), 3, 5);
+            state.swipe_update("pad", -100.0, 0.0, 6);
+            state.swipe_update("pad", 210.0, 0.0, 7);
+            let preview = state.gestures.transition.unwrap();
+            assert_eq!(
+                (preview.target, preview.direction),
+                (6, Direction::Previous)
+            );
+            state.swipe_end("pad", false, 8);
+            assert_eq!(
+                state.active_workspace, 6,
+                "reversal commits the opposite sparse target"
+            );
+            state.switch_workspace(0);
+            state.swipe_begin("pad".into(), 3, 9);
+            state.swipe_update("pad", -100.0, 0.0, 10);
+        });
+        // Destroy the previewed target through the real Wayland lifecycle.
+        let (surface, xdg, top) = &windows[1];
+        top.destroy();
+        xdg.destroy();
+        surface.destroy();
+        queue.roundtrip(&mut client).unwrap();
+        inspect(&sender, |state| {
+            state.maintain_swipe();
+            assert!(!state.workspace_occupied(3));
+            assert!(state.gestures.transition.is_none());
+            state.swipe_update("pad", -100.0, 0.0, 11);
+            state.swipe_end("pad", false, 12);
+            assert_eq!(
+                state.active_workspace, 0,
+                "target destruction cancels rather than retargets"
+            );
+        });
+        let (surface, xdg, top) = &windows[2];
+        top.destroy();
+        xdg.destroy();
+        surface.destroy();
+        queue.roundtrip(&mut client).unwrap();
+        inspect(&sender, |state| {
+            state.dispatch(Action::NextWorkspace).unwrap();
+            state.dispatch(Action::PreviousWorkspace).unwrap();
+            state.swipe_begin("pad".into(), 3, 13);
+            state.swipe_update("pad", -200.0, 0.0, 14);
+            assert!(state.gestures.transition.is_none());
+            state.swipe_end("pad", false, 15);
+            assert_eq!(
+                state.active_workspace, 0,
+                "only occupied workspace stays put"
+            );
+        });
+        let (surface, xdg, top) = &windows[0];
+        top.destroy();
+        xdg.destroy();
+        surface.destroy();
+        queue.roundtrip(&mut client).unwrap();
+        inspect(&sender, |state| {
+            assert_eq!(
+                state.active_workspace, 0,
+                "closing last window never auto-leaves"
+            );
+            state.dispatch(Action::FocusWorkspace(5)).unwrap();
+            state.dispatch(Action::NextWorkspace).unwrap();
+            state.dispatch(Action::PreviousWorkspace).unwrap();
+            assert_eq!(
+                state.active_workspace, 4,
+                "all empty stays on selected slot"
+            );
+        });
+    });
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while !thread.is_finished() {
+        assert!(
+            Instant::now() < deadline,
+            "sparse navigation test timed out"
+        );
+        event_loop
+            .dispatch(Duration::from_millis(2), &mut state)
+            .unwrap();
+        while let Ok(inspect) = requests.try_recv() {
+            inspect(&mut state);
+        }
+        state.maintain_swipe();
+        state.space.refresh();
+        state.display_handle.flush_clients().unwrap();
+    }
+    thread.join().unwrap();
+}

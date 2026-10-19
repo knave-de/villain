@@ -114,6 +114,10 @@ pub(crate) fn constrain_geometry(
 }
 
 impl Workspace {
+    pub(crate) fn is_empty(&self) -> bool {
+        self.windows.is_empty()
+    }
+
     fn descendant_of(&self, entry: &WorkspaceWindow, ancestor: WindowId) -> bool {
         let mut parent = entry.parent;
         for _ in 0..self.windows.len() {

@@ -28,6 +28,7 @@ impl Default for InputConfig {
 #[derive(Clone, Debug)]
 pub struct RuntimeConfig {
     pub master_percent: u8,
+    pub workspace: knave_config::CompositorWorkspaceConfig,
     pub appearance: knave_config::WindowAppearance,
     pub input: InputConfig,
     /// Ordered `[[compositor.device]]` rules; later matches override earlier ones.
@@ -107,6 +108,7 @@ impl RuntimeConfig {
 
         Ok(Self {
             master_percent: compositor.master_percent,
+            workspace: compositor.workspace,
             appearance: compositor.appearance.clone(),
             input: InputConfig {
                 tap_to_click: compositor.input.tap_to_click,

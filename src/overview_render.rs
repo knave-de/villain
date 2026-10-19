@@ -74,11 +74,7 @@ pub fn elements(
         }
         let width = state.output_size.w;
         let offset = transition.offset.round() as i32;
-        let incoming = if transition.target == (transition.source + 1) % state.workspaces.len() {
-            offset + width
-        } else {
-            offset - width
-        };
+        let incoming = offset + transition.direction.incoming_offset(width);
         let bounds = Rectangle::from_size((width, state.output_size.h).into());
         let mut effects = std::mem::take(&mut state.appearance_renderer);
         let scenes = (|| {

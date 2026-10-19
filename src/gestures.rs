@@ -1,5 +1,5 @@
 //! One owner per swipe stream; workspace mutation stays in Dispatch.
-use crate::{dispatch::Dispatch, state::Villain};
+use crate::{dispatch::Dispatch, state::Villain, workspace_navigation::Direction};
 use knave_config::gesture::{GestureAction, GestureBinding, GestureConfig, GestureDirection};
 use smithay::{
     input::pointer::{GestureSwipeBeginEvent, GestureSwipeEndEvent, GestureSwipeUpdateEvent},
@@ -84,6 +84,7 @@ struct Stream {
 pub(crate) struct Transition {
     pub source: usize,
     pub target: usize,
+    pub direction: Direction,
     pub offset: f64,
     settle: Option<(Instant, f64, f64)>,
 }
@@ -146,10 +147,17 @@ impl Villain {
         self.stop_swipe_visual();
     }
     pub(crate) fn maintain_swipe(&mut self) {
-        if (self.gestures.reserved()
-            || self.gestures.transition.is_some()
-            || self.screenshot.intercepting_pointer())
-            && self.swipe_blocked()
+        let target_disappeared = self.config.workspace.skip_empty
+            && self.gestures.reserved()
+            && self
+                .gestures
+                .transition
+                .is_some_and(|transition| !self.workspace_occupied(transition.target));
+        if target_disappeared
+            || ((self.gestures.reserved()
+                || self.gestures.transition.is_some()
+                || self.screenshot.intercepting_pointer())
+                && self.swipe_blocked())
         {
             self.cancel_swipe(0);
         }
@@ -225,20 +233,30 @@ impl Villain {
                 let offset = recognizer.update(x, y, f64::from(self.output_size.w));
                 if offset != 0.0 || self.gestures.transition.is_some() {
                     let source = stream.source;
-                    let count = self.workspaces.len();
-                    let target = if offset == 0.0 {
-                        self.gestures
-                            .transition
-                            .map_or((source + 1) % count, |transition| transition.target)
-                    } else if offset < 0.0 {
-                        (source + 1) % count
+                    let previous = self.gestures.transition;
+                    let direction = if offset < 0.0 {
+                        Direction::Next
+                    } else if offset > 0.0 {
+                        Direction::Previous
                     } else {
-                        (source + count - 1) % count
+                        previous.expect("existing preview at zero offset").direction
+                    };
+                    // Keep the preview stable while windows appear in intervening slots.
+                    let target = previous
+                        .filter(|preview| {
+                            preview.source == source && preview.direction == direction
+                        })
+                        .map(|preview| preview.target)
+                        .or_else(|| self.workspace_target(source, direction));
+                    let Some(target) = target else {
+                        self.stop_swipe_visual();
+                        return;
                     };
                     self.gestures.transition_device = Some(device.into());
                     self.gestures.transition = Some(Transition {
                         source,
                         target,
+                        direction,
                         offset,
                         settle: None,
                     });
@@ -280,11 +298,7 @@ impl Villain {
                     0.0
                 };
                 if commit {
-                    let dispatch = if transition.offset < 0.0 {
-                        Dispatch::NextWorkspace
-                    } else {
-                        Dispatch::PreviousWorkspace
-                    };
+                    let dispatch = Dispatch::FocusWorkspace(transition.target + 1);
                     if let Err(error) = self.dispatch(dispatch) {
                         tracing::warn!(%error, "swipe workspace commit failed");
                         return;
