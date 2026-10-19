@@ -352,7 +352,7 @@ fn process_input(event: InputEvent<LibinputInputBackend>, state: &mut Villain) {
             if crate::screenshot::pointer_motion(state) {
                 return;
             }
-            state.refresh_pointer(event.time_msec());
+            state.refresh_pointer_motion(event.time_msec());
         }
         InputEvent::PointerMotionAbsolute { event } => {
             state.pointer_location = (
@@ -363,7 +363,7 @@ fn process_input(event: InputEvent<LibinputInputBackend>, state: &mut Villain) {
             if crate::screenshot::pointer_motion(state) {
                 return;
             }
-            state.refresh_pointer(event.time_msec());
+            state.refresh_pointer_motion(event.time_msec());
         }
         InputEvent::PointerButton { event } => {
             if crate::screenshot::pointer_button(

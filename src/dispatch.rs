@@ -6,6 +6,22 @@ use knave_desktop_api::{DesktopCommand, WindowId};
 
 use crate::{state::Villain, workspace_navigation::Direction};
 
+/// Walk direction for window focus cycling within a workspace.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FocusCycleStep {
+    Next,
+    Previous,
+}
+
+/// Spatial direction for directional focus within a workspace layout.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FocusDirection {
+    Left,
+    Right,
+    Up,
+    Down,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Dispatch {
     ReloadConfig,
@@ -22,6 +38,8 @@ pub enum Dispatch {
     NextWorkspace,
     FocusWindow(WindowId),
     RestoreWindow(WindowId),
+    FocusCycle(FocusCycleStep),
+    FocusDirection(FocusDirection),
     Spawn(Vec<String>),
     Quit,
     ToggleOverview,
@@ -168,6 +186,14 @@ impl Villain {
                 {
                     self.switch_workspace(target);
                 }
+                Ok(())
+            }
+            Dispatch::FocusCycle(step) => {
+                self.cycle_focus(step);
+                Ok(())
+            }
+            Dispatch::FocusDirection(direction) => {
+                self.focus_directional(direction);
                 Ok(())
             }
             Dispatch::FocusWindow(window) => match self.focus_window(window) {

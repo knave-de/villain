@@ -14,6 +14,7 @@ use crate::keybinds::KeybindRegistry;
 pub struct InputConfig {
     pub tap_to_click: bool,
     pub natural_scroll: bool,
+    pub focus_follows_mouse: bool,
 }
 
 impl Default for InputConfig {
@@ -21,6 +22,7 @@ impl Default for InputConfig {
         Self {
             tap_to_click: true,
             natural_scroll: true,
+            focus_follows_mouse: true,
         }
     }
 }
@@ -28,6 +30,7 @@ impl Default for InputConfig {
 #[derive(Clone, Debug)]
 pub struct RuntimeConfig {
     pub master_percent: u8,
+    pub focus_cycle_order: knave_config::FocusCycleOrder,
     pub workspace: knave_config::CompositorWorkspaceConfig,
     pub appearance: knave_config::WindowAppearance,
     pub input: InputConfig,
@@ -108,11 +111,13 @@ impl RuntimeConfig {
 
         Ok(Self {
             master_percent: compositor.master_percent,
+            focus_cycle_order: compositor.focus_cycle_order,
             workspace: compositor.workspace,
             appearance: compositor.appearance.clone(),
             input: InputConfig {
                 tap_to_click: compositor.input.tap_to_click,
                 natural_scroll: compositor.input.natural_scroll,
+                focus_follows_mouse: compositor.input.focus_follows_mouse,
             },
             devices: compositor.device.clone(),
             gestures: crate::gestures::bindings(&compositor.gesture),
@@ -222,6 +227,7 @@ mod tests {
     fn defaults_are_wayland_native_and_touchpad_friendly() {
         assert!(InputConfig::default().tap_to_click);
         assert!(InputConfig::default().natural_scroll);
+        assert!(InputConfig::default().focus_follows_mouse);
         assert_eq!(default_environment()["XDG_SESSION_TYPE"], "wayland");
         assert_eq!(
             default_environment()["ELECTRON_OZONE_PLATFORM_HINT"],
@@ -286,12 +292,17 @@ mod tests {
         let path = directory.join("config.toml");
         fs::write(
             &path,
-            "[compositor]\nmodkey = \"Alt\"\n[compositor.input]\ntap_to_click = false\nnatural_scroll = false\n",
+            "[compositor]\nmodkey = \"Alt\"\nfocus_cycle_order = \"mru\"\n[compositor.input]\ntap_to_click = false\nnatural_scroll = false\nfocus_follows_mouse = false\n",
         )
         .unwrap();
         let current = RuntimeConfig::load_from(path.clone()).unwrap();
         assert!(!current.input.tap_to_click);
         assert!(!current.input.natural_scroll);
+        assert!(!current.input.focus_follows_mouse);
+        assert_eq!(
+            current.focus_cycle_order,
+            knave_config::FocusCycleOrder::Mru
+        );
 
         fs::write(&path, "[compositor]\nmodkey = \"Invalid\"\n").unwrap();
         assert!(current.reload().is_err());

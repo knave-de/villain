@@ -818,6 +818,272 @@ fn wayland_floating_and_fullscreen_requests() {
     thread.join().unwrap();
 }
 
+#[test]
+#[ignore = "requires private Unix sockets and an isolated XDG_RUNTIME_DIR"]
+fn focus_cycle_wraps_skips_minimized_and_leaves_maximize() {
+    let mut event_loop = EventLoop::try_new().unwrap();
+    let mut state = Villain::new(
+        &mut event_loop,
+        Display::new().unwrap(),
+        crate::config::RuntimeConfig::load().unwrap(),
+    );
+    let (server, client) = UnixStream::pair().unwrap();
+    state
+        .display_handle
+        .insert_client(server, Arc::new(crate::state::ClientState::default()))
+        .unwrap();
+    let (sender, requests) = mpsc::channel::<Inspect>();
+    let thread = std::thread::spawn(move || {
+        let conn = Connection::from_socket(client).unwrap();
+        let (globals, mut queue) = registry_queue_init::<Client>(&conn).unwrap();
+        let qh = queue.handle();
+        let compositor: wl_compositor::WlCompositor = globals.bind(&qh, 1..=4, ()).unwrap();
+        let wm: xdg_wm_base::XdgWmBase = globals.bind(&qh, 1..=6, ()).unwrap();
+        let mut client = Client::default();
+        let create = |id, name: &str| {
+            let surface = compositor.create_surface(&qh, ());
+            let xdg = wm.get_xdg_surface(&surface, &qh, ());
+            let top = xdg.get_toplevel(&qh, id);
+            top.set_app_id(name.into());
+            (surface, xdg, top)
+        };
+        let settle = |queue: &mut wayland_client::EventQueue<Client>, client: &mut Client| {
+            queue.roundtrip(client).unwrap();
+            queue.roundtrip(client).unwrap();
+        };
+        let (a, _ax, _at) = create(1, "primary");
+        a.commit();
+        let (b, _bx, _bt) = create(2, "other");
+        b.commit();
+        settle(&mut queue, &mut client);
+        // Newest mapped window wins initial focus.
+        inspect(&sender, |state| {
+            use crate::dispatch::{Dispatch, FocusCycleStep};
+            assert!(find(state, "other").focused);
+
+            // Layout order: master first, then the stack. Wrapping is clean.
+            state
+                .dispatch(Dispatch::FocusCycle(FocusCycleStep::Previous))
+                .unwrap();
+            assert!(find(state, "primary").focused);
+            state
+                .dispatch(Dispatch::FocusCycle(FocusCycleStep::Next))
+                .unwrap();
+            assert!(find(state, "other").focused);
+
+            // Minimized windows are not targets: the cycle keeps skipping them.
+            let id = find(state, "primary").id;
+            state.focus_window(id);
+            assert!(state.minimize_focused_window());
+            state
+                .dispatch(Dispatch::FocusCycle(FocusCycleStep::Next))
+                .unwrap();
+            assert!(find(state, "other").focused);
+            state.dispatch(Dispatch::RestoreLastMinimized).unwrap();
+            state.focus_window(find(state, "primary").id);
+
+            // Focus switching must leave a maximize overlay: the target is
+            // revealed by un-maximizing the blocker.
+            state.set_window_maximized(&state.workspaces[0].windows[0].window.clone(), true);
+            assert!(!mapped(state, "other"));
+            state
+                .dispatch(Dispatch::FocusCycle(FocusCycleStep::Next))
+                .unwrap();
+            assert!(find(state, "other").focused);
+            assert!(!find(state, "primary").maximized);
+            assert!(mapped(state, "other") && mapped(state, "primary"));
+        });
+        settle(&mut queue, &mut client);
+    });
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while !thread.is_finished() {
+        assert!(Instant::now() < deadline, "Wayland request test timed out");
+        event_loop
+            .dispatch(Duration::from_millis(2), &mut state)
+            .unwrap();
+        while let Ok(inspect) = requests.try_recv() {
+            inspect(&mut state);
+        }
+        state.space.refresh();
+        state.display_handle.flush_clients().unwrap();
+    }
+    thread.join().unwrap();
+}
+
+#[test]
+#[ignore = "requires private Unix sockets and an isolated XDG_RUNTIME_DIR"]
+fn directional_focus_and_cycle_order_follow_configuration() {
+    let mut event_loop = EventLoop::try_new().unwrap();
+    let mut state = Villain::new(
+        &mut event_loop,
+        Display::new().unwrap(),
+        crate::config::RuntimeConfig::load().unwrap(),
+    );
+    let (server, client) = UnixStream::pair().unwrap();
+    state
+        .display_handle
+        .insert_client(server, Arc::new(crate::state::ClientState::default()))
+        .unwrap();
+    let (sender, requests) = mpsc::channel::<Inspect>();
+    let thread = std::thread::spawn(move || {
+        let conn = Connection::from_socket(client).unwrap();
+        let (globals, mut queue) = registry_queue_init::<Client>(&conn).unwrap();
+        let qh = queue.handle();
+        let compositor: wl_compositor::WlCompositor = globals.bind(&qh, 1..=4, ()).unwrap();
+        let wm: xdg_wm_base::XdgWmBase = globals.bind(&qh, 1..=6, ()).unwrap();
+        let shm: wl_shm::WlShm = globals.bind(&qh, 1..=1, ()).unwrap();
+        let mut client = Client::default();
+        let create = |id, name: &str| {
+            let surface = compositor.create_surface(&qh, ());
+            let xdg = wm.get_xdg_surface(&surface, &qh, ());
+            let top = xdg.get_toplevel(&qh, id);
+            top.set_app_id(name.into());
+            (surface, xdg, top)
+        };
+        let settle = |queue: &mut wayland_client::EventQueue<Client>, client: &mut Client| {
+            queue.roundtrip(client).unwrap();
+            queue.roundtrip(client).unwrap();
+        };
+        // Attach a 400x600 buffer everywhere so pointer hit testing follows
+        // the normal client path.
+        let buffer = {
+            let path =
+                std::env::temp_dir().join(format!("villain-focus-tests-{}", std::process::id()));
+            let file = std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create_new(true)
+                .open(&path)
+                .unwrap();
+            std::fs::remove_file(path).unwrap();
+            file.set_len(400 * 600 * 4).unwrap();
+            let pool = shm.create_pool(file.as_fd(), 400 * 600 * 4, &qh, ());
+            pool.create_buffer(0, 400, 600, 400 * 4, wl_shm::Format::Argb8888, &qh, ())
+        };
+        use crate::dispatch::{Dispatch, FocusCycleStep, FocusDirection};
+        let (a, _ax, _at) = create(1, "primary");
+        a.attach(Some(&buffer), 0, 0);
+        a.commit();
+        let (b, _bx, _bt) = create(2, "other");
+        b.attach(Some(&buffer), 0, 0);
+        b.commit();
+        let (c, _cx, _ct) = create(3, "tertiary");
+        c.attach(Some(&buffer), 0, 0);
+        c.commit();
+        settle(&mut queue, &mut client);
+        inspect(&sender, |state| {
+            // Master left; two stack slices top and bottom. Right from the
+            // master hits an equal-distance tie between the slices, which
+            // layout order resolves to the first candidate.
+            state.focus_window(find(state, "primary").id);
+            state
+                .dispatch(Dispatch::FocusDirection(FocusDirection::Right))
+                .unwrap();
+            assert!(find(state, "other").focused);
+            state
+                .dispatch(Dispatch::FocusDirection(FocusDirection::Down))
+                .unwrap();
+            assert!(find(state, "tertiary").focused);
+            state
+                .dispatch(Dispatch::FocusDirection(FocusDirection::Up))
+                .unwrap();
+            assert!(find(state, "other").focused);
+            state
+                .dispatch(Dispatch::FocusDirection(FocusDirection::Up))
+                .unwrap();
+            assert!(
+                find(state, "other").focused,
+                "nothing lies above the top slice: the edge is a no-op"
+            );
+            state
+                .dispatch(Dispatch::FocusDirection(FocusDirection::Left))
+                .unwrap();
+            assert!(find(state, "primary").focused);
+            state
+                .dispatch(Dispatch::FocusDirection(FocusDirection::Left))
+                .unwrap();
+            assert!(
+                find(state, "primary").focused,
+                "nothing lies left of the master: the edge is a no-op"
+            );
+
+            // Layout order walks primary, other, tertiary.
+            state.focus_window(find(state, "tertiary").id);
+            state.focus_window(find(state, "primary").id);
+            state
+                .dispatch(Dispatch::FocusCycle(FocusCycleStep::Next))
+                .unwrap();
+            assert!(find(state, "other").focused);
+            state.focus_window(find(state, "primary").id);
+
+            // MRU order walks most recently focused first, so Next from the
+            // master targets tertiary, the second-newest focus. The recency
+            // order is only rewritten by ordinary focus changes, so repeated
+            // presses keep walking the last order.
+            state.config.focus_cycle_order = knave_config::FocusCycleOrder::Mru;
+            state
+                .dispatch(Dispatch::FocusCycle(FocusCycleStep::Next))
+                .unwrap();
+            assert!(find(state, "tertiary").focused);
+            state
+                .dispatch(Dispatch::FocusCycle(FocusCycleStep::Next))
+                .unwrap();
+            assert!(find(state, "other").focused);
+            state
+                .dispatch(Dispatch::FocusCycle(FocusCycleStep::Next))
+                .unwrap();
+            assert!(find(state, "primary").focused, "mru cycles wrap");
+            state
+                .dispatch(Dispatch::FocusCycle(FocusCycleStep::Previous))
+                .unwrap();
+            assert!(find(state, "other").focused);
+            state
+                .dispatch(Dispatch::FocusCycle(FocusCycleStep::Previous))
+                .unwrap();
+            assert!(find(state, "tertiary").focused);
+            state.config.focus_cycle_order = knave_config::FocusCycleOrder::Layout;
+        });
+        settle(&mut queue, &mut client);
+        inspect(&sender, |state| {
+            assert!(find(state, "primary").focused || find(state, "tertiary").focused);
+            let id = find(state, "primary").id;
+            state.focus_window(id);
+            // Hover-to-focus: window focus follows pointer motion.
+            state.config.input.focus_follows_mouse = true;
+            state.pointer_location = (600.0, 100.0).into();
+            state.refresh_pointer_motion(0);
+            assert!(
+                find(state, "other").focused,
+                "motion over a window focuses it"
+            );
+            // Click-to-focus: motion refreshes visuals only.
+            state.config.input.focus_follows_mouse = false;
+            let id = find(state, "primary").id;
+            state.focus_window(id);
+            state.refresh_pointer_motion(1);
+            assert!(
+                find(state, "primary").focused,
+                "motion keeps focus with focus following off"
+            );
+            state.config.input.focus_follows_mouse = true;
+        });
+        settle(&mut queue, &mut client);
+    });
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while !thread.is_finished() {
+        assert!(Instant::now() < deadline, "Wayland request test timed out");
+        event_loop
+            .dispatch(Duration::from_millis(2), &mut state)
+            .unwrap();
+        while let Ok(inspect) = requests.try_recv() {
+            inspect(&mut state);
+        }
+        state.space.refresh();
+        state.display_handle.flush_clients().unwrap();
+    }
+    thread.join().unwrap();
+}
+
 #[path = "tile_tests.rs"]
 mod tile_tests;
 

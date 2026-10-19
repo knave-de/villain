@@ -8,7 +8,11 @@ use smithay::{
     utils::SERIAL_COUNTER,
 };
 
-use crate::{config::BindSpec, dispatch::Dispatch, state::Villain};
+use crate::{
+    config::BindSpec,
+    dispatch::{Dispatch, FocusCycleStep, FocusDirection},
+    state::Villain,
+};
 
 #[derive(Clone, Debug, PartialEq)]
 enum KeyboardAction {
@@ -94,6 +98,12 @@ impl KeybindRegistry {
             spec("MOD+SHIFT+PRINT", "screenshot", &["window", "clipboard"]),
             spec("MOD+M", "minimize", &[]),
             spec("MOD+SHIFT+M", "restore-minimized", &[]),
+            spec("MOD+H", "focus-left", &[]),
+            spec("MOD+L", "focus-right", &[]),
+            spec("MOD+K", "focus-up", &[]),
+            spec("MOD+J", "focus-down", &[]),
+            spec("MOD+TAB", "focus-next", &[]),
+            spec("MOD+SHIFT+TAB", "focus-previous", &[]),
             spec("MOD+LEFT", "previous-workspace", &[]),
             spec("MOD+RIGHT", "next-workspace", &[]),
         ];
@@ -299,6 +309,20 @@ fn parse_dispatch(spec: &BindSpec) -> Result<Dispatch, String> {
         "restore-minimized" if spec.args.is_empty() => Ok(Dispatch::RestoreLastMinimized),
         "previous-workspace" if spec.args.is_empty() => Ok(Dispatch::PreviousWorkspace),
         "next-workspace" if spec.args.is_empty() => Ok(Dispatch::NextWorkspace),
+        "focus-next" | "focus-previous" if spec.args.is_empty() => {
+            Ok(Dispatch::FocusCycle(match spec.dispatch.as_str() {
+                "focus-next" => FocusCycleStep::Next,
+                _ => FocusCycleStep::Previous,
+            }))
+        }
+        "focus-left" | "focus-right" | "focus-up" | "focus-down" if spec.args.is_empty() => {
+            Ok(Dispatch::FocusDirection(match spec.dispatch.as_str() {
+                "focus-left" => FocusDirection::Left,
+                "focus-right" => FocusDirection::Right,
+                "focus-up" => FocusDirection::Up,
+                _ => FocusDirection::Down,
+            }))
+        }
         "quit" if spec.args.is_empty() => Ok(Dispatch::Quit),
         "toggle-overview" if spec.args.is_empty() => Ok(Dispatch::ToggleOverview),
         // Keep user configurations that copied the former default from creating
@@ -316,7 +340,8 @@ fn parse_dispatch(spec: &BindSpec) -> Result<Dispatch, String> {
         }
         "maximize" | "unmaximize" | "toggle-maximize" | "close" | "minimize"
         | "restore-minimized" | "previous-workspace" | "next-workspace" | "quit"
-        | "toggle-overview" => Err("dispatch does not accept arguments".into()),
+        | "toggle-overview" | "focus-next" | "focus-previous" | "focus-left" | "focus-right"
+        | "focus-up" | "focus-down" => Err("dispatch does not accept arguments".into()),
         "exec" => Err("exec requires a program in args".into()),
         "workspace" => Err("workspace requires exactly one argument".into()),
         dispatch => Err(format!("unknown dispatch {dispatch:?}")),
@@ -534,6 +559,43 @@ mod tests {
                 KeybindRegistry::from_specs("Super", &[spec("MOD+F", name, &["unexpected"])])
                     .is_err()
             );
+        }
+    }
+
+    #[test]
+    fn focus_switch_bindings_resolve_names_and_reject_arguments() {
+        let registry = KeybindRegistry::defaults("Super").unwrap();
+        let keys = |sym| [Keysym::new(sym)];
+        assert_eq!(
+            registry.find(&keys(keysyms::KEY_Tab), false, false, false, true),
+            Some(Dispatch::FocusCycle(FocusCycleStep::Next))
+        );
+        assert_eq!(
+            registry.find(&keys(keysyms::KEY_Tab), false, false, true, true),
+            Some(Dispatch::FocusCycle(FocusCycleStep::Previous))
+        );
+        assert_eq!(
+            registry.find(&keys(keysyms::KEY_h), false, false, false, true),
+            Some(Dispatch::FocusDirection(FocusDirection::Left))
+        );
+        assert_eq!(
+            registry.find(&keys(keysyms::KEY_j), false, false, false, true),
+            Some(Dispatch::FocusDirection(FocusDirection::Down))
+        );
+        assert_eq!(
+            registry.find(&keys(keysyms::KEY_k), false, false, false, true),
+            Some(Dispatch::FocusDirection(FocusDirection::Up))
+        );
+        assert_eq!(
+            registry.find(&keys(keysyms::KEY_l), false, false, false, true),
+            Some(Dispatch::FocusDirection(FocusDirection::Right))
+        );
+        for (keys, dispatch) in [
+            ("MOD+TAB", "focus-next"),
+            ("MOD+SHIFT+TAB", "focus-previous"),
+            ("MOD+L", "focus-right"),
+        ] {
+            assert!(parse_dispatch(&spec(keys, dispatch, &["extra"])).is_err());
         }
     }
 
