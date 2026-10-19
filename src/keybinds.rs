@@ -181,7 +181,10 @@ impl KeybindRegistry {
 impl BindingKey {
     fn matches(self, raw_syms: &[Keysym]) -> bool {
         raw_syms.iter().any(|symbol| match self {
-            Self::Keysym(expected) => symbol.raw() == expected,
+            Self::Keysym(expected) => {
+                symbol.raw() == expected
+                    || (expected == keysyms::KEY_Tab && symbol.raw() == keysyms::KEY_ISO_Left_Tab)
+            }
             Self::Modifier(Modkey::Alt) => {
                 matches!(symbol.raw(), keysyms::KEY_Alt_L | keysyms::KEY_Alt_R)
             }
@@ -572,6 +575,10 @@ mod tests {
         );
         assert_eq!(
             registry.find(&keys(keysyms::KEY_Tab), false, false, true, true),
+            Some(Dispatch::FocusCycle(FocusCycleStep::Previous))
+        );
+        assert_eq!(
+            registry.find(&keys(keysyms::KEY_ISO_Left_Tab), false, false, true, true),
             Some(Dispatch::FocusCycle(FocusCycleStep::Previous))
         );
         assert_eq!(
