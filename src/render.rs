@@ -82,6 +82,7 @@ pub fn init_winit(
         .handle()
         .insert_source(winit_source, move |event, _, state| match event {
             WinitEvent::Resized { size, .. } => {
+                state.cancel_swipe(0);
                 state.output_size = size.to_logical(1);
                 state.overview_panes.clear();
                 state.winit.as_ref().unwrap().output.change_current_state(
@@ -168,6 +169,7 @@ pub fn init_winit(
             WinitEvent::Focus(focused) => {
                 state.host_focused = focused;
                 if !focused {
+                    state.cancel_swipe(0);
                     crate::screenshot::cancel(state, false);
                     state.screenshot.clear_intercepted_buttons();
                     state.release_pointer_buttons();

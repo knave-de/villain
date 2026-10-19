@@ -101,6 +101,7 @@ impl Villain {
                     .config
                     .reload()
                     .map_err(|error| DispatchError::Config(error.to_string()))?;
+                self.cancel_swipe(0);
                 self.release_pointer_buttons();
                 self.appearance_renderer.clear();
                 self.config = config;

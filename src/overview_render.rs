@@ -3,7 +3,10 @@
 use smithay::{
     backend::renderer::{
         element::{
-            Id, Kind, memory::MemoryRenderBufferRenderElement, solid::SolidColorRenderElement,
+            Id, Kind,
+            memory::MemoryRenderBufferRenderElement,
+            solid::SolidColorRenderElement,
+            utils::{CropRenderElement, Relocate, RelocateRenderElement},
         },
         gles::GlesRenderer,
         utils::CommitCounter,
@@ -19,6 +22,7 @@ smithay::backend::renderer::element::render_elements! {
     Overlay=smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement<GlesRenderer>,
     Window=crate::capture_window::WindowElement,
     Scene=crate::appearance::render::EffectElement,
+    Swipe=CropRenderElement<RelocateRenderElement<crate::appearance::render::EffectElement>>,
     Screenshot=MemoryRenderBufferRenderElement<GlesRenderer>,
     ScreenshotOverlay=SolidColorRenderElement,
 }
@@ -35,6 +39,72 @@ pub fn elements(
         .into_iter()
         .map(OverviewRenderElement::Cursor)
         .collect();
+    let cursor_len = result.len();
+    if let Some(transition) = state.gestures.transition {
+        use smithay::{
+            backend::renderer::element::AsRenderElements, desktop::layer_map_for_output,
+        };
+        // Keep shell UI stationary, above the two clipped workspace scenes.
+        for output in state.space.outputs() {
+            let map = layer_map_for_output(output);
+            for layer in map
+                .layers()
+                .filter(|layer| layer.namespace() != "knave-shell-wallpaper")
+            {
+                if !state.layer_surface_visible(layer.wl_surface()) {
+                    continue;
+                }
+                if let Some(geometry) = map.layer_geometry(layer) {
+                    let elements: Vec<
+                        smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement<
+                            GlesRenderer,
+                        >,
+                    > = layer.render_elements(
+                        renderer,
+                        geometry.loc.to_physical_precise_round(1.0),
+                        Scale::from(1.0),
+                        1.0,
+                    );
+                    result.splice(
+                        cursor_len..cursor_len,
+                        elements.into_iter().map(OverviewRenderElement::Overlay),
+                    );
+                }
+            }
+        }
+        let width = state.output_size.w;
+        let offset = transition.offset.round() as i32;
+        let incoming = if transition.target == (transition.source + 1) % state.workspaces.len() {
+            offset + width
+        } else {
+            offset - width
+        };
+        let bounds = Rectangle::from_size((width, state.output_size.h).into());
+        let mut effects = std::mem::take(&mut state.appearance_renderer);
+        let scenes = (|| {
+            for (workspace, x) in [(transition.source, offset), (transition.target, incoming)] {
+                let clip = Rectangle::new((x, 0).into(), (width, state.output_size.h).into());
+                let Some(clip) = clip.intersection(bounds) else {
+                    continue;
+                };
+                let scene = effects.scene(
+                    state,
+                    renderer,
+                    workspace,
+                    crate::appearance::render::SceneLayers::Wallpaper,
+                )?;
+                result.extend(scene.into_iter().filter_map(|element| {
+                    let shifted =
+                        RelocateRenderElement::from_element(element, (x, 0), Relocate::Relative);
+                    CropRenderElement::from_element(shifted, 1.0, clip)
+                        .map(OverviewRenderElement::Swipe)
+                }));
+            }
+            Ok(result)
+        })();
+        state.appearance_renderer = effects;
+        return scenes;
+    }
     let output = state.output_size;
     let overview_mapped = state.overview_mapped();
     if overview_mapped {

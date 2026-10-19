@@ -206,6 +206,7 @@ pub fn init(
         .handle()
         .insert_source(notifier, move |event, _, state| match event {
             SessionEvent::PauseSession => {
+                state.cancel_swipe(0);
                 input.suspend();
                 state.release_pointer_buttons();
                 let keyboard = state.keyboard.clone();
@@ -332,6 +333,7 @@ fn process_input(event: InputEvent<LibinputInputBackend>, state: &mut Villain) {
             }
         }
         InputEvent::DeviceRemoved { device } => {
+            state.swipe_device_removed(&smithay::backend::input::Device::id(&device));
             if let Some(tty) = state.tty.as_mut() {
                 tty.input_devices.retain(|candidate| candidate != &device);
             }
@@ -420,6 +422,23 @@ fn process_input(event: InputEvent<LibinputInputBackend>, state: &mut Villain) {
             let pointer = state.pointer.clone();
             pointer.axis(state, frame);
             pointer.frame(state);
+        }
+        InputEvent::GestureSwipeBegin { event } => {
+            use smithay::backend::input::{Device, GestureBeginEvent};
+            state.swipe_begin(event.device().id(), event.fingers(), event.time_msec());
+        }
+        InputEvent::GestureSwipeUpdate { event } => {
+            use smithay::backend::input::{Device, GestureSwipeUpdateEvent};
+            state.swipe_update(
+                &event.device().id(),
+                event.delta_x(),
+                event.delta_y(),
+                event.time_msec(),
+            );
+        }
+        InputEvent::GestureSwipeEnd { event } => {
+            use smithay::backend::input::{Device, GestureEndEvent};
+            state.swipe_end(&event.device().id(), event.cancelled(), event.time_msec());
         }
         _ => {}
     }

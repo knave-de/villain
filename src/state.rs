@@ -49,6 +49,7 @@ pub struct Villain {
     pub(crate) appearance_renderer: crate::appearance::render::EffectsRenderer,
 
     pub(crate) capture: crate::capture::CaptureState,
+    pub(crate) gestures: crate::gestures::Gestures,
     pub(crate) screenshot: crate::screenshot::ScreenshotState,
     pub(crate) foreign_toplevel_state:
         smithay::wayland::foreign_toplevel_list::ForeignToplevelListState,
@@ -150,6 +151,7 @@ impl Villain {
         let pointer = seat.add_pointer();
 
         crate::capture::init(&display_handle);
+        smithay::wayland::pointer_gestures::PointerGesturesState::new::<Self>(&display_handle);
         Self {
             foreign_toplevel_state:
                 smithay::wayland::foreign_toplevel_list::ForeignToplevelListState::new::<Self>(
@@ -159,6 +161,7 @@ impl Villain {
 
             capture: crate::capture::CaptureState::default(),
             screenshot: crate::screenshot::ScreenshotState::default(),
+            gestures: Default::default(),
             tty: None,
             winit: None,
             dmabuf_state: smithay::wayland::dmabuf::DmabufState::new(),

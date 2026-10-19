@@ -60,8 +60,15 @@ impl Villain {
                     for window in state.space.elements() {
                         window.send_frame(&output, now, None, |_, _| Some(output.clone()));
                     }
-                    for pane in &state.overview_panes {
-                        let index = pane.workspace.0 as usize - 1;
+                    for index in 0..state.workspaces.len() {
+                        if !state.gestures.visible(index)
+                            && !state
+                                .overview_panes
+                                .iter()
+                                .any(|pane| pane.workspace.0 as usize == index + 1)
+                        {
+                            continue;
+                        }
                         if index != state.active_workspace
                             && let Some(scene) = state.workspace_preview_scene(index)
                         {

@@ -225,3 +225,14 @@ excluded content, and produces black until the first allowed frame. Sessions are
 bounded to eight and canvases to eight million pixels. Shell layers and overview
 panes are excluded from workspace capture. See Knave ADR 0007 for deployment and
 compatibility; multiple-monitor selection remains out of scope.
+
+## Workspace swipes
+
+Three-finger horizontal touchpad swipes move workspace scenes with your fingers.
+Left advances, right goes back, wrapping at the ends. Release beyond a quarter
+of the output width commits; shorter or cancelled swipes settle back.
+Panels and the cursor stay stationary. See the
+[Knave gesture contract](https://github.com/knave-de/knave/blob/master/docs/architecture/decisions/0010-workspace-swipes.md).
+Override entries under `[[compositor.gesture.bind]]` by fingers and direction;
+`action = "none"` disables the matching compositor gesture. These are Villain
+actions, not knavectl commands. Reload applies validated changes atomically.

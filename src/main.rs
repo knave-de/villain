@@ -13,6 +13,8 @@ mod cursor;
 mod dispatch;
 mod focus;
 mod frame_clock;
+mod gesture_test;
+mod gestures;
 mod handlers;
 mod input_devices;
 mod ipc;
@@ -73,6 +75,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         session::activate(&mut state, true);
     }
 
+    let _gesture_test = if !direct {
+        gesture_test::install(&mut state)?
+    } else {
+        None
+    };
     tracing::info!(socket = ?state.socket_name, "Villain is ready");
     if direct {
         tracing::info!("submitting initial direct TTY frame");
@@ -82,6 +89,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         tracing::info!("initial direct TTY frame request completed");
     }
     event_loop.run(None, &mut state, |state| {
+        state.maintain_swipe();
         state.reap_children();
         state.space.refresh();
         state.popups.cleanup();
