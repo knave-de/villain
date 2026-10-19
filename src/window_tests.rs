@@ -1106,7 +1106,6 @@ fn directional_focus_and_cycle_order_follow_configuration() {
             handle_keyboard_key(state, Keycode::new(133), Released, 10);
             assert!(state.suppressed_keys.is_empty());
             assert!(!state.keyboard.modifier_state().logo);
-            state.focus_window(find(state, "primary").id);
         });
         settle(&mut queue, &mut client);
         assert!(
@@ -1130,7 +1129,7 @@ fn directional_focus_and_cycle_order_follow_configuration() {
             "enter excludes intercepted shortcut keys"
         );
         inspect(&sender, |state| {
-            assert!(find(state, "primary").focused || find(state, "tertiary").focused);
+            assert!(find(state, "other").focused);
             let id = find(state, "primary").id;
             state.focus_window(id);
             // Hover-to-focus: window focus follows pointer motion.
