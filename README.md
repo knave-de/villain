@@ -70,19 +70,14 @@ Control commands are issued through knavectl:
 
 ## Configuration
 
-The target persistent configuration is
-~/.config/knave/config.toml, owned and schema-versioned by Knave. The
-compositor settings live under [compositor] with modkey, input,
-environment_file, and bind entries. Knave projects the old root-level
-modkey, environment_file, [input], and [[bind]] keys when that table is
-absent, preserving the source document for rollback. Villain never writes a
-second configuration store. Villain receives the validated projection during
-session startup and reload; root-level compatibility is migration-only and must
-not silently delete old values.
+The canonical configuration is `~/.config/knave/config.toml`, owned by Knave.
+Compositor settings live under `[compositor]` with modkey, input,
+environment_file, and bind entries. Villain receives the validated projection
+during session startup and reload. The unreleased format has no schema version
+or root-level compatibility projection.
 
-The tracked `config.example.toml` is a root-level migration/test fixture only; it
-is not loaded or installed by Villain. Create and edit the canonical Knave
-configuration instead.
+The tracked `config.example.toml` demonstrates the `[compositor]` section of
+Knave's canonical config. Villain does not install a separate config file.
 
 ## Repository boundaries
 
@@ -129,8 +124,9 @@ the normal layout. Child dialogs remain visible above their maximized parent.
     knavectl dispatch unmaximize
     knavectl dispatch toggle-maximize
 
-Custom binding sets replace the defaults. Add this to the existing canonical
-Knave configuration when using custom bindings:
+Custom bindings override the default with the same key combination; other
+defaults stay active. Add this to the existing canonical Knave configuration
+when overriding a binding:
 
 ```toml
 [[compositor.bind]]
@@ -156,9 +152,9 @@ changes to a horizontal resize cursor. Default shortcuts are `MOD+Ctrl+Left`
 `MOD+Ctrl+R` (reset to the configured default). Each key press makes one step.
 `MOD` is the configured modkey, normally Super.
 
-Custom binding sets replace defaults. Append these entries to your existing
-configuration if you use custom bindings; change the keys or signed step size
-as desired:
+Custom bindings override the defaults with the same key combination. Append
+these entries to your existing configuration to use them; change the keys or
+signed step size as desired:
 
 ```toml
 [[compositor.bind]]
@@ -200,7 +196,8 @@ input, so the frozen image keeps tooltips and other layer surfaces visible.
 | `MOD+Shift+Print` | Copy the focused window as PNG |
 
 Saved files go to `$XDG_PICTURES_DIR/Screenshots` or `~/Pictures/Screenshots`.
-Custom binding sets replace defaults; these actions use
+Custom bindings override matching defaults and are additive otherwise; these
+actions use
 `dispatch = "screenshot"` with arguments `region|output|window` and
 `save|clipboard`.
 

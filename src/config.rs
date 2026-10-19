@@ -80,12 +80,10 @@ impl RuntimeConfig {
                 args: binding.args.clone(),
             })
             .collect();
-        let keybinds = if bindings.is_empty() {
-            KeybindRegistry::defaults(&compositor.modkey)
-        } else {
-            KeybindRegistry::from_specs(&compositor.modkey, &bindings)
-        }
-        .map_err(ConfigError)?;
+        // Explicit bindings override matching defaults in place; other
+        // defaults stay active so one custom binding keeps the rest of the set.
+        let keybinds =
+            KeybindRegistry::with_overrides(&compositor.modkey, &bindings).map_err(ConfigError)?;
 
         let mut environment = default_environment();
         let default_environment_path = path
@@ -286,36 +284,32 @@ mod tests {
         let path = directory.join("config.toml");
         fs::write(
             &path,
-            "schema_version = 1\n[compositor]\nmodkey = \"Alt\"\n[compositor.input]\ntap_to_click = false\nnatural_scroll = false\n",
+            "[compositor]\nmodkey = \"Alt\"\n[compositor.input]\ntap_to_click = false\nnatural_scroll = false\n",
         )
         .unwrap();
         let current = RuntimeConfig::load_from(path.clone()).unwrap();
         assert!(!current.input.tap_to_click);
         assert!(!current.input.natural_scroll);
 
-        fs::write(
-            &path,
-            "schema_version = 1\n[compositor]\nmodkey = \"Invalid\"\n",
-        )
-        .unwrap();
+        fs::write(&path, "[compositor]\nmodkey = \"Invalid\"\n").unwrap();
         assert!(current.reload().is_err());
         assert!(!current.input.tap_to_click);
         fs::remove_dir_all(directory).unwrap();
     }
     #[test]
-    fn root_settings_are_projected_by_knave() {
+    fn compositor_settings_are_projected_by_knave() {
         let directory =
-            std::env::temp_dir().join(format!("villain-root-config-{}", std::process::id()));
+            std::env::temp_dir().join(format!("villain-compositor-config-{}", std::process::id()));
         fs::create_dir_all(&directory).unwrap();
         let path = directory.join("config.toml");
         fs::write(
             &path,
-            r#"schema_version = 1
+            r#"[compositor]
 modkey = "Alt"
-[input]
+[compositor.input]
 tap_to_click = false
 natural_scroll = false
-[[bind]]
+[[compositor.bind]]
 keys = "MOD+Q"
 dispatch = "close"
 "#,
@@ -329,6 +323,48 @@ dispatch = "close"
     }
 
     #[test]
+    fn explicit_bindings_override_matches_and_keep_other_defaults() {
+        use crate::dispatch::Dispatch;
+        use smithay::input::keyboard::{Keysym, keysyms};
+
+        let directory =
+            std::env::temp_dir().join(format!("villain-keybind-config-{}", std::process::id()));
+        fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("config.toml");
+        fs::write(
+            &path,
+            r#"[compositor]
+modkey = "Super"
+
+[[compositor.bind]]
+keys = "MOD+Q"
+dispatch = "exec"
+args = ["bemenu"]
+"#,
+        )
+        .unwrap();
+
+        let config = RuntimeConfig::load_from(path).unwrap();
+        let q = [Keysym::new(keysyms::KEY_q)];
+        assert_eq!(
+            config.keybinds.find(&q, false, false, false, true),
+            Some(Dispatch::Spawn(vec!["bemenu".into()]))
+        );
+        // An unmentioned default binding survives the override.
+        assert_eq!(
+            config.keybinds.find(
+                &[Keysym::new(keysyms::KEY_Return)],
+                false,
+                false,
+                false,
+                true,
+            ),
+            Some(Dispatch::Spawn(vec!["kitty".into()]))
+        );
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
     fn device_rules_are_projected_from_the_knave_configuration() {
         let directory =
             std::env::temp_dir().join(format!("villain-device-config-{}", std::process::id()));
@@ -336,8 +372,7 @@ dispatch = "close"
         let path = directory.join("config.toml");
         fs::write(
             &path,
-            r#"schema_version = 2
-[compositor]
+            r#"[compositor]
 modkey = "Super"
 
 [[compositor.device]]

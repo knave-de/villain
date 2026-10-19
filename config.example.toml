@@ -1,88 +1,17 @@
-# ~/.config/villain/config.toml
+# Compositor settings for ~/.config/knave/config.toml
+
+[compositor]
 
 modkey = "Alt"
-environment_file = "~/.config/villain/environment"
+environment_file = "environment"
 
-[input]
+[compositor.input]
 tap_to_click = true
 natural_scroll = true
 
-# If any [[bind]] entries are present, they replace the complete default set.
-[[bind]]
-keys = "MOD"
-dispatch = "toggle-overview"
-
-[[bind]]
-keys = "MOD+RETURN"
-dispatch = "exec"
-args = ["kitty"]
-
-[[bind]]
+# Each entry overrides the default binding with the same keys; unmentioned
+# defaults stay active and other entries are additions.
+[[compositor.bind]]
 keys = "MOD+Q"
-dispatch = "close"
-
-[[bind]]
-keys = "MOD+M"
-dispatch = "minimize"
-
-[[bind]]
-keys = "MOD+SHIFT+M"
-dispatch = "restore-minimized"
-
-[[bind]]
-keys = "MOD+LEFT"
-dispatch = "previous-workspace"
-
-[[bind]]
-keys = "MOD+RIGHT"
-dispatch = "next-workspace"
-
-[[bind]]
-keys = "MOD+1"
-dispatch = "workspace"
-args = ["1"]
-
-[[bind]]
-keys = "MOD+2"
-dispatch = "workspace"
-args = ["2"]
-
-[[bind]]
-keys = "MOD+3"
-dispatch = "workspace"
-args = ["3"]
-
-[[bind]]
-keys = "MOD+4"
-dispatch = "workspace"
-args = ["4"]
-
-[[bind]]
-keys = "MOD+5"
-dispatch = "workspace"
-args = ["5"]
-
-[[bind]]
-keys = "MOD+6"
-dispatch = "workspace"
-args = ["6"]
-
-[[bind]]
-keys = "MOD+7"
-dispatch = "workspace"
-args = ["7"]
-
-[[bind]]
-keys = "MOD+8"
-dispatch = "workspace"
-args = ["8"]
-
-[[bind]]
-keys = "MOD+9"
-dispatch = "workspace"
-args = ["9"]
-
-[[bind]]
-keys = "MOD+0"
-dispatch = "workspace"
-args = ["10"]
+dispatch = "exec"
+args = ["bemenu-run"]

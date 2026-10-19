@@ -44,6 +44,40 @@ pub struct KeybindRegistry {
 
 impl KeybindRegistry {
     pub fn defaults(modkey: &str) -> Result<Self, String> {
+        Self::from_specs(modkey, &Self::default_specs())
+    }
+
+    /// Apply explicit bindings on top of the default set. An explicit binding
+    /// with the same effective key combination replaces only the matching
+    /// default, mirroring how later `[[compositor.device]]` rules layer over
+    /// earlier ones; every other default stays active. Bindings that match no
+    /// default are additions. Overriding the same combination twice fails.
+    pub(crate) fn with_overrides(modkey: &str, overrides: &[BindSpec]) -> Result<Self, String> {
+        let mut base = Self::from_specs(modkey, &Self::default_specs())?;
+        let modkey = parse_modkey(modkey)?;
+        let mut overridden = HashSet::new();
+        for spec in overrides {
+            let keys = parse_keys(&spec.keys, modkey)
+                .map_err(|error| format!("binding {:?}: {error}", spec.keys))?;
+            if !overridden.insert(keys) {
+                return Err(format!("duplicate keybinding {:?}", spec.keys));
+            }
+            let dispatch = parse_dispatch(spec)
+                .map_err(|error| format!("binding {:?}: {error}", spec.keys))?;
+            if let Some(binding) = base
+                .bindings
+                .iter_mut()
+                .find(|binding| binding.keys == keys)
+            {
+                binding.dispatch = dispatch;
+            } else {
+                base.bindings.push(Keybind { keys, dispatch });
+            }
+        }
+        Ok(base)
+    }
+
+    fn default_specs() -> Vec<BindSpec> {
         let mut specs = vec![
             spec("MOD", "toggle-overview", &[]),
             spec("MOD+RETURN", "exec", &["kitty"]),
@@ -71,7 +105,7 @@ impl KeybindRegistry {
             });
         }
         specs.push(spec("MOD+0", "workspace", &["10"]));
-        Self::from_specs(modkey, &specs)
+        specs
     }
 
     pub(crate) fn from_specs(modkey: &str, specs: &[BindSpec]) -> Result<Self, String> {
@@ -91,7 +125,7 @@ impl KeybindRegistry {
         Ok(Self { bindings })
     }
 
-    fn find(
+    pub(crate) fn find(
         &self,
         raw_syms: &[Keysym],
         ctrl: bool,
@@ -103,7 +137,7 @@ impl KeybindRegistry {
             .map(|binding| binding.dispatch.clone())
     }
 
-    fn find_modifier_only(
+    pub(crate) fn find_modifier_only(
         &self,
         raw_syms: &[Keysym],
         ctrl: bool,
@@ -501,6 +535,81 @@ mod tests {
                     .is_err()
             );
         }
+    }
+
+    #[test]
+    fn explicit_bindings_replace_only_the_matching_default() {
+        let registry = KeybindRegistry::with_overrides(
+            "Super",
+            &[
+                spec("MOD+Q", "exec", &["wofi"]),
+                spec("MOD+LEFT", "exec", &["bemenu"]),
+            ],
+        )
+        .unwrap();
+        let q = [Keysym::new(keysyms::KEY_q)];
+        let left = [Keysym::new(keysyms::KEY_Left)];
+        assert_eq!(
+            registry.find(&q, false, false, false, true),
+            Some(Dispatch::Spawn(vec!["wofi".into()]))
+        );
+        assert_eq!(
+            registry.find(&left, false, false, false, true),
+            Some(Dispatch::Spawn(vec!["bemenu".into()]))
+        );
+        // Unmentioned defaults keep working.
+        assert_eq!(
+            registry.find(
+                &[Keysym::new(keysyms::KEY_Return)],
+                false,
+                false,
+                false,
+                true,
+            ),
+            Some(Dispatch::Spawn(vec!["kitty".into()]))
+        );
+    }
+
+    #[test]
+    fn explicit_bindings_without_default_match_are_additive() {
+        let registry =
+            KeybindRegistry::with_overrides("Super", &[spec("MOD+H", "exec", &["bemenu"])])
+                .unwrap();
+        let h = [Keysym::new(keysyms::KEY_h)];
+        assert_eq!(
+            registry.find(&h, false, false, false, true),
+            Some(Dispatch::Spawn(vec!["bemenu".into()]))
+        );
+        let q = [Keysym::new(keysyms::KEY_q)];
+        assert_eq!(
+            registry.find(&q, false, false, false, true),
+            Some(Dispatch::CloseFocused)
+        );
+    }
+
+    #[test]
+    fn modifier_only_defaults_can_be_overridden() {
+        let registry =
+            KeybindRegistry::with_overrides("Super", &[spec("MOD", "exec", &["wofi"])]).unwrap();
+        assert_eq!(
+            registry.find_modifier_only(
+                &[Keysym::new(keysyms::KEY_Super_L)],
+                false,
+                false,
+                false,
+                true,
+            ),
+            Some(Dispatch::Spawn(vec!["wofi".into()]))
+        );
+    }
+
+    #[test]
+    fn overriding_the_same_combination_twice_fails() {
+        let overrides = vec![
+            spec("MOD+Q", "minimize", &[]),
+            spec("MOD+Q", "exec", &["bemenu"]),
+        ];
+        assert!(KeybindRegistry::with_overrides("Super", &overrides).is_err());
     }
 
     #[test]

@@ -410,19 +410,11 @@ fn wayland_floating_and_fullscreen_requests() {
             // Defaults reload without overwriting a workspace's manual choice.
             let path = knave_config::ConfigDocument::default_path().unwrap();
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-            std::fs::write(
-                &path,
-                "schema_version = 1\n[compositor]\nmaster_percent = 60\n",
-            )
-            .unwrap();
+            std::fs::write(&path, "[compositor]\nmaster_percent = 60\n").unwrap();
             s.dispatch(Dispatch::ReloadConfig).unwrap();
             assert_eq!(s.master_ratio(0), 6000);
             s.dispatch(Dispatch::ResizeMaster(5)).unwrap();
-            std::fs::write(
-                &path,
-                "schema_version = 1\n[compositor]\nmaster_percent = 70\n",
-            )
-            .unwrap();
+            std::fs::write(&path, "[compositor]\nmaster_percent = 70\n").unwrap();
             s.dispatch(Dispatch::ReloadConfig).unwrap();
             assert_eq!(s.master_ratio(0), 6500);
             s.dispatch(Dispatch::ResetMaster).unwrap();
