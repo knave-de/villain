@@ -1363,6 +1363,19 @@ impl Villain {
     }
 
     pub(crate) fn focused_window(&self) -> Option<Window> {
+        if self.pending_focus_restore
+            && let Some((id, _)) = self.pending_focus_window
+            && self.window_is_visible(self.active_workspace, id)
+            && let Some(window) = self.workspaces[self.active_workspace]
+                .windows
+                .iter()
+                .find(|entry| entry.id == id)
+                .map(|entry| entry.window.clone())
+        {
+            // Keep compositor-side focus actions moving from the latest
+            // selection while client keyboard focus waits for shortcut release.
+            return Some(window);
+        }
         let focused = self.keyboard.current_focus()?;
         self.workspaces[self.active_workspace]
             .windows
@@ -1500,6 +1513,9 @@ impl Villain {
             self.keyboard
                 .clone()
                 .set_focus(self, Some(surface), SERIAL_COUNTER.next_serial());
+            self.pending_focus_restore = false;
+            self.pending_focus_window = None;
+        } else {
             self.pending_focus_restore = false;
             self.pending_focus_window = None;
         }

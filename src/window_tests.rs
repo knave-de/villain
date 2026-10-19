@@ -1051,6 +1051,67 @@ fn directional_focus_and_cycle_order_follow_configuration() {
                 .unwrap();
             assert!(find(state, "tertiary").focused);
             state.config.focus_cycle_order = knave_config::FocusCycleOrder::Layout;
+
+            // Repeated focus commands advance their logical target while the
+            // client keyboard focus remains deferred until MOD is released.
+            state.focus_window(find(state, "primary").id);
+            let mod_key = smithay::input::keyboard::Keycode::new(125);
+            state.suppressed_keys.insert(mod_key);
+            let actual_focus = state.keyboard.current_focus();
+            for target_name in ["other", "tertiary"] {
+                state
+                    .dispatch(Dispatch::FocusCycle(FocusCycleStep::Next))
+                    .unwrap();
+                let target = find(state, target_name).id;
+                assert_eq!(state.pending_focus_window, Some((target, false)));
+                assert_eq!(state.keyboard.current_focus(), actual_focus);
+                assert_eq!(
+                    state
+                        .focused_window()
+                        .and_then(|window| state.window_id(&window)),
+                    Some(target)
+                );
+            }
+            state.suppressed_keys.remove(&mod_key);
+            state.flush_pending_focus();
+            assert!(find(state, "tertiary").focused);
+
+            // Returning to the already keyboard-focused window clears the
+            // deferred target instead of replaying a stale intermediate one.
+            state.focus_window(find(state, "primary").id);
+            state.suppressed_keys.insert(mod_key);
+            for _ in 0..3 {
+                state
+                    .dispatch(Dispatch::FocusCycle(FocusCycleStep::Next))
+                    .unwrap();
+            }
+            assert!(!state.pending_focus_restore);
+            assert_eq!(state.pending_focus_window, None);
+            state.suppressed_keys.remove(&mod_key);
+            state.flush_pending_focus();
+            assert!(find(state, "primary").focused);
+
+            // Directional focus uses the pending selection as its origin too.
+            state.focus_window(find(state, "tertiary").id);
+            state.suppressed_keys.insert(mod_key);
+            state
+                .dispatch(Dispatch::FocusDirection(FocusDirection::Left))
+                .unwrap();
+            assert_eq!(
+                state.pending_focus_window,
+                Some((find(state, "primary").id, true))
+            );
+            state
+                .dispatch(Dispatch::FocusDirection(FocusDirection::Right))
+                .unwrap();
+            assert_eq!(
+                state.pending_focus_window,
+                Some((find(state, "other").id, true))
+            );
+            state.suppressed_keys.remove(&mod_key);
+            state.flush_pending_focus();
+            assert!(find(state, "other").focused);
+            state.focus_window(find(state, "primary").id);
         });
         settle(&mut queue, &mut client);
         inspect(&sender, |state| {
