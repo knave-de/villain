@@ -135,6 +135,7 @@ pub fn init_winit(
                     },
                 );
                 pointer.frame(state);
+                state.update_interaction_cursor();
             }
             WinitEvent::Input(InputEvent::PointerAxis { event }) => {
                 if state.screenshot.intercepting_pointer() {

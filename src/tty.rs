@@ -391,6 +391,7 @@ fn process_input(event: InputEvent<LibinputInputBackend>, state: &mut Villain) {
                 },
             );
             pointer.frame(state);
+            state.update_interaction_cursor();
         }
         InputEvent::PointerAxis { event } => {
             if state.screenshot.intercepting_pointer() {

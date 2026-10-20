@@ -448,6 +448,7 @@ impl Villain {
                     self.stack_divider_under_pointer()
                         .map(|_| CursorIcon::RowResize)
                 })
+                .or_else(|| self.split_under_pointer().map(|_| CursorIcon::ColResize))
         } else {
             None
         };
