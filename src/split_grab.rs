@@ -4,7 +4,7 @@ use smithay::backend::input::ButtonState;
 
 impl Villain {
     pub(crate) fn stack_divider_under_pointer(&self) -> Option<Operation> {
-        if !self.can_start_interaction() {
+        if !self.can_start_interaction() || self.layer_under_pointer(true).is_some() {
             return None;
         }
         if let Some((window, origin)) = self.input_window_at_pointer() {
@@ -25,6 +25,9 @@ impl Villain {
         }
         let context = self.split_context()?;
         let slots = self.tiled_slots();
+        if slots.len() < 3 {
+            return None;
+        }
         let weights = self.stack_weights();
         for (pair, neighbors) in slots[1..].windows(2).enumerate() {
             let upper = neighbors[0].1;

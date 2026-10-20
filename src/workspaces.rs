@@ -227,7 +227,9 @@ impl Villain {
         let windows: Vec<_> = self.workspaces[self.active_workspace]
             .windows
             .iter()
-            .filter(|entry| !entry.minimized && entry.floating.is_none())
+            .filter(|entry| {
+                !entry.minimized && !workspace.hidden_by_parent(entry) && entry.floating.is_none()
+            })
             .map(|entry| entry.id)
             .collect();
         (windows.len() >= 2).then_some(SplitContext {
@@ -482,7 +484,9 @@ impl Villain {
         let count = workspace
             .windows
             .iter()
-            .filter(|entry| !entry.minimized && entry.floating.is_none())
+            .filter(|entry| {
+                !entry.minimized && !workspace.hidden_by_parent(entry) && entry.floating.is_none()
+            })
             .count();
         let usable = self.usable_area();
         let area = if self.config.appearance.views.tiled.gaps {
@@ -493,7 +497,9 @@ impl Villain {
         let weights: Vec<_> = workspace
             .windows
             .iter()
-            .filter(|entry| !entry.minimized && entry.floating.is_none())
+            .filter(|entry| {
+                !entry.minimized && !workspace.hidden_by_parent(entry) && entry.floating.is_none()
+            })
             .skip(1)
             .map(|entry| entry.stack_weight)
             .collect();
@@ -513,7 +519,7 @@ impl Villain {
             let base = if let Some(rect) = entry.floating {
                 let (min, max) = Self::window_constraints(&entry.window);
                 constrain_geometry(rect, self.output_size, min, max)
-            } else if !entry.minimized {
+            } else if !entry.minimized && !workspace.hidden_by_parent(entry) {
                 let (loc, size) = tiles.next().unwrap();
                 Rectangle::new(loc + area.loc, size)
             } else {

@@ -230,6 +230,17 @@ fn desktop_drag_resize_and_floating_lifecycle() {
             motion(s, 400.0, 400.0);
             s.minimize_focused_window();
             assert!(s.interaction.is_none() && !s.pointer.is_grabbed());
+            // User-tiled transient children disappear with a minimized parent.
+            // Hidden children cannot reserve slots or expose a phantom divider.
+            for entry in &mut s.workspaces[s.active_workspace].windows {
+                if entry.id != id {
+                    entry.parent = Some(id);
+                }
+            }
+            s.relayout_active_workspace();
+            assert!(s.tiled_slots().is_empty());
+            motion(s, 600.0, 200.0);
+            assert!(s.stack_divider_under_pointer().is_none());
         });
         queue.roundtrip(&mut client).unwrap();
         queue.roundtrip(&mut client).unwrap();

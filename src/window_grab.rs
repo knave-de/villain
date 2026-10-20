@@ -130,6 +130,7 @@ impl Villain {
                 self.pending_modifier = None;
             }
             if self.can_start_interaction()
+                && self.layer_under_pointer(true).is_none()
                 && let Some(dispatch) = self.config.keybinds.find_mouse(button, mods)
             {
                 self.swallowed_buttons.insert(button);
@@ -262,6 +263,9 @@ impl Villain {
                 "another interaction or shell surface owns input",
             ));
         }
+        if target == WindowTarget::Pointer && self.layer_under_pointer(true).is_some() {
+            return Err(DispatchError::Interaction("shell surface is under pointer"));
+        }
         let window = match target {
             WindowTarget::Focused => self
                 .focused_window()
@@ -290,7 +294,6 @@ impl Villain {
             && !self.pointer.is_grabbed()
             && !self.keyboard.is_grabbed()
             && self.exclusive_layer_focus().is_none()
-            && self.layer_under_pointer(true).is_none()
             && !self.overview_visible
             && !self.overview_mapped()
             && !self.screenshot.intercepting_pointer()

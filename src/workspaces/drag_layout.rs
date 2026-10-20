@@ -87,10 +87,13 @@ impl Villain {
     }
 
     pub(crate) fn stack_weights(&self) -> Vec<(WindowId, u32)> {
-        self.workspaces[self.active_workspace]
+        let workspace = &self.workspaces[self.active_workspace];
+        workspace
             .windows
             .iter()
-            .filter(|entry| entry.floating.is_none() && !entry.minimized)
+            .filter(|entry| {
+                entry.floating.is_none() && !entry.minimized && !workspace.hidden_by_parent(entry)
+            })
             .skip(1)
             .map(|entry| (entry.id, entry.stack_weight))
             .collect()
