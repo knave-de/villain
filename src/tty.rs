@@ -317,6 +317,8 @@ pub fn render_if_needed(state: &mut Villain) {
     if let Err(error) = tty.render(state) {
         // The first frame after regaining DRM master can race the kernel
         // handoff. Keep the damage pending for the next real event.
+        state.cancel_swipe(0);
+        state.cancel_workspace_motion();
         tracing::warn!(%error, "DRM render failed; resetting buffers");
         tty.pending = false;
         tty.surface.reset_buffers();

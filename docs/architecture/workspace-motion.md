@@ -8,7 +8,7 @@ restores the preceding Villain binary. Shell overview browsing remains unchanged
 
 `motion::Tween` is a pure scalar timeline: start, goal, monotonic start instant and
 duration. Explicit `sample(now)` returns position and completion, with cubic
- ease-out interpolation. Zero duration, equal endpoints and late frames complete
+ease-out interpolation. Zero duration, equal endpoints and late frames complete
 exactly at the goal. Sampling never schedules work or mutates desktop state.
 Retargeting samples at the supplied instant and starts from that position;
 repeating the goal leaves the timeline alone. Position is continuous, velocity
@@ -65,3 +65,12 @@ cover logical focus/history, reserved gestures and timer cleanup. Frozen-bundle
 nested checks must assert intermediate displacement, rendered source/destination,
 stationary panels, rapid retargeting, interruptions and idle/stress resource bounds.
 Nested Winit software rendering does not establish DRM/GPU or physical input behavior.
+
+Run the feature check (ImageMagick and the standard harness dependencies required):
+
+```sh
+python3 scripts/workspace-motion-smoke.py --bundle /absolute/bundle --run /fresh/artifacts
+```
+
+Use `--baseline` with a preceding bundle to measure the same workloads without
+requiring its test socket to expose the new motion fields.
