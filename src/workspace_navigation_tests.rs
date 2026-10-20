@@ -181,3 +181,55 @@ fn sparse_navigation_and_preview_lifecycle() {
     }
     thread.join().unwrap();
 }
+
+#[test]
+#[ignore = "requires private Unix sockets and an isolated XDG_RUNTIME_DIR"]
+fn last_workspace_tracks_successful_switches_and_toggles() {
+    let mut event_loop = EventLoop::try_new().unwrap();
+    let mut state = Villain::new(
+        &mut event_loop,
+        Display::new().unwrap(),
+        crate::config::RuntimeConfig::load().unwrap(),
+    );
+    state.dispatch(Action::LastWorkspace).unwrap();
+    assert_eq!(state.active_workspace, 0, "no history at startup");
+    assert_eq!(state.last_workspace, None);
+    state.dispatch(Action::FocusWorkspace(7)).unwrap();
+    state.dispatch(Action::FocusWorkspace(7)).unwrap();
+    state.switch_workspace(10);
+    assert!(state.dispatch(Action::FocusWorkspace(0)).is_err());
+    assert_eq!(
+        state.last_workspace,
+        Some(0),
+        "no-op/invalid switches preserve history"
+    );
+    state.config.workspace.skip_empty = true;
+    state.dispatch(Action::LastWorkspace).unwrap();
+    assert_eq!(
+        state.active_workspace, 0,
+        "history includes empty workspaces"
+    );
+    state.dispatch(Action::LastWorkspace).unwrap();
+    assert_eq!(state.active_workspace, 6, "repeated use toggles");
+    state.config.workspace.skip_empty = false;
+    state.dispatch(Action::PreviousWorkspace).unwrap();
+    state.dispatch(Action::LastWorkspace).unwrap();
+    assert_eq!(
+        state.active_workspace, 6,
+        "directional switches update history"
+    );
+    state.swipe_begin("pad".into(), 3, 1);
+    state.swipe_update("pad", -100.0, 0.0, 2);
+    state.swipe_end("pad", false, 3);
+    assert_eq!(state.active_workspace, 7);
+    state.dispatch(Action::LastWorkspace).unwrap();
+    assert_eq!(state.active_workspace, 6, "committed swipes update history");
+    state.swipe_begin("pad".into(), 3, 4);
+    state.swipe_update("pad", -100.0, 0.0, 5);
+    state.swipe_end("pad", true, 6);
+    state.dispatch(Action::LastWorkspace).unwrap();
+    assert_eq!(
+        state.active_workspace, 7,
+        "cancelled swipes preserve history"
+    );
+}

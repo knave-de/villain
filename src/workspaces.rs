@@ -985,6 +985,9 @@ impl Villain {
             self.space.unmap_elem(&window);
             Self::set_activated(&window, false);
         }
+        if index != self.active_workspace {
+            self.last_workspace = Some(self.active_workspace);
+        }
         self.active_workspace = index;
         self.relayout_active_workspace();
     }

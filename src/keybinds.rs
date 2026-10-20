@@ -110,6 +110,7 @@ impl KeybindRegistry {
             spec("MOD+TAB", "focus-next", &[]),
             spec("MOD+SHIFT+TAB", "focus-previous", &[]),
             spec("MOD+LEFT", "previous-workspace", &[]),
+            spec("MOD+GRAVE", "last-workspace", &[]),
             spec("MOD+RIGHT", "next-workspace", &[]),
         ];
         for workspace in 1..=9 {
@@ -281,6 +282,7 @@ fn parse_keys(value: &str, modkey: Modkey) -> Result<KeyCombination, String> {
                 "ENTER" => "Return",
                 "ESC" => "Escape",
                 "SPACE" => "space",
+                "TILDE" | "~" => "grave",
                 _ => key,
             };
             let sym = xkb::keysym_from_name(canonical, xkb::KEYSYM_CASE_INSENSITIVE).raw();
@@ -354,6 +356,7 @@ fn parse_dispatch(spec: &BindSpec) -> Result<Dispatch, String> {
         "minimize" if spec.args.is_empty() => Ok(Dispatch::MinimizeFocused),
         "restore-minimized" if spec.args.is_empty() => Ok(Dispatch::RestoreLastMinimized),
         "previous-workspace" if spec.args.is_empty() => Ok(Dispatch::PreviousWorkspace),
+        "last-workspace" if spec.args.is_empty() => Ok(Dispatch::LastWorkspace),
         "next-workspace" if spec.args.is_empty() => Ok(Dispatch::NextWorkspace),
         "focus-next" | "focus-previous" if spec.args.is_empty() => {
             Ok(Dispatch::FocusCycle(match spec.dispatch.as_str() {
@@ -385,9 +388,11 @@ fn parse_dispatch(spec: &BindSpec) -> Result<Dispatch, String> {
             Ok(Dispatch::FocusWorkspace(workspace))
         }
         "toggle-floating" | "maximize" | "unmaximize" | "toggle-maximize" | "close"
-        | "minimize" | "restore-minimized" | "previous-workspace" | "next-workspace" | "quit"
-        | "toggle-overview" | "focus-next" | "focus-previous" | "focus-left" | "focus-right"
-        | "focus-up" | "focus-down" => Err("dispatch does not accept arguments".into()),
+        | "minimize" | "restore-minimized" | "previous-workspace" | "last-workspace"
+        | "next-workspace" | "quit" | "toggle-overview" | "focus-next" | "focus-previous"
+        | "focus-left" | "focus-right" | "focus-up" | "focus-down" => {
+            Err("dispatch does not accept arguments".into())
+        }
         "exec" => Err("exec requires a program in args".into()),
         "workspace" => Err("workspace requires exactly one argument".into()),
         dispatch => Err(format!("unknown dispatch {dispatch:?}")),
@@ -731,6 +736,37 @@ mod tests {
         ] {
             assert!(parse_dispatch(&spec(keys, dispatch, &["extra"])).is_err());
         }
+    }
+
+    #[test]
+    fn last_workspace_binding_resolves_modkey_and_can_be_overridden() {
+        let grave = [Keysym::new(keysyms::KEY_grave)];
+        for (modkey, alt, logo) in [("Super", false, true), ("Alt", true, false)] {
+            let registry = KeybindRegistry::defaults(modkey).unwrap();
+            assert_eq!(
+                registry.find(&grave, false, alt, false, logo),
+                Some(Dispatch::LastWorkspace)
+            );
+        }
+        for name in ["GRAVE", "TILDE", "~"] {
+            let registry = KeybindRegistry::with_overrides(
+                "Super",
+                &[spec(&format!("MOD+{name}"), "workspace", &["4"])],
+            )
+            .unwrap();
+            assert_eq!(
+                registry.find(&grave, false, false, false, true),
+                Some(Dispatch::FocusWorkspace(4))
+            );
+        }
+        let registry =
+            KeybindRegistry::with_overrides("Super", &[spec("MOD+B", "last-workspace", &[])])
+                .unwrap();
+        assert_eq!(
+            registry.find(&[Keysym::new(keysyms::KEY_b)], false, false, false, true),
+            Some(Dispatch::LastWorkspace)
+        );
+        assert!(parse_dispatch(&spec("MOD+GRAVE", "last-workspace", &["extra"])).is_err());
     }
 
     #[test]
