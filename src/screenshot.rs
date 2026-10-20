@@ -25,6 +25,7 @@ use smithay::{
 
 use crate::{
     capture::{self, CapturedFrame},
+    screenshot_notification::ScreenshotNotice,
     state::Villain,
 };
 
@@ -74,6 +75,7 @@ pub(crate) struct ScreenshotState {
     intercepted_buttons: std::collections::HashSet<u32>,
     transfers: Vec<Transfer>,
     next_transfer_id: u64,
+    notifications: crate::screenshot_notification::ScreenshotNotifier,
 }
 
 impl ScreenshotState {
@@ -307,6 +309,16 @@ fn finish(
         Destination::Save => {
             let path = save_png(&encoded)?;
             tracing::info!(path = %path.display(), width = size.w, height = size.h, "screenshot saved");
+            state
+                .screenshot
+                .notifications
+                .submit(ScreenshotNotice::saved(
+                    path,
+                    size.w as u32,
+                    size.h as u32,
+                    &pixels,
+                    state.application_environment(),
+                ));
         }
         Destination::Clipboard => {
             let payload = SelectionPayload::Png(Arc::from(encoded));
@@ -321,6 +333,14 @@ fn finish(
                 height = size.h,
                 "screenshot copied to clipboard"
             );
+            state
+                .screenshot
+                .notifications
+                .submit(ScreenshotNotice::copied(
+                    size.w as u32,
+                    size.h as u32,
+                    &pixels,
+                ));
         }
     }
     Ok(())

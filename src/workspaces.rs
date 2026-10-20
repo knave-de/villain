@@ -15,7 +15,7 @@ use smithay::{
     wayland::{seat::WaylandFocus, shell::xdg::ToplevelSurface},
     xwayland::X11Surface,
 };
-use std::process::Command;
+use std::{collections::BTreeMap, process::Command};
 mod drag_layout;
 use drag_layout::weighted_heights;
 
@@ -745,16 +745,12 @@ impl Villain {
         let mut command = Command::new(program);
         command
             .args(arguments)
-            .envs(&self.config.environment)
             // A shell started from a desktop terminal can inherit the host's
             // X11 display and a forced GTK backend. Neither describes the
             // session that Villain is providing to this child.
             .env_remove("DISPLAY")
             .env_remove("WAYLAND_SOCKET")
-            .env("WAYLAND_DISPLAY", &self.socket_name);
-        if let Some(display) = self.xwayland_display {
-            command.env("DISPLAY", format!(":{display}"));
-        }
+            .envs(self.application_environment());
         let child = command.spawn()?;
         tracing::info!(
             pid = child.id(),
@@ -765,6 +761,22 @@ impl Villain {
         self.children.push((workspace, child));
         Ok(())
     }
+    /// Environment inherited by applications Villain launches into its session.
+    pub(crate) fn application_environment(&self) -> BTreeMap<String, String> {
+        let mut environment = self.config.environment.clone();
+        environment.remove("WAYLAND_SOCKET");
+        environment.insert(
+            "WAYLAND_DISPLAY".into(),
+            self.socket_name.to_string_lossy().into_owned(),
+        );
+        if let Some(display) = self.xwayland_display {
+            environment.insert("DISPLAY".into(), format!(":{display}"));
+        } else {
+            environment.remove("DISPLAY");
+        }
+        environment
+    }
+
     pub fn reap_children(&mut self) {
         self.children
             .retain_mut(|(_, child)| match child.try_wait() {

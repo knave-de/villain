@@ -251,10 +251,11 @@ input, so the frozen image keeps tooltips and other layer surfaces visible.
 | `MOD+Shift+Print` | Copy the focused window as PNG |
 
 Saved files go to `$XDG_PICTURES_DIR/Screenshots` or `~/Pictures/Screenshots`.
-Custom bindings override matching defaults and are additive otherwise; these
-actions use
-`dispatch = "screenshot"` with arguments `region|output|window` and
-`save|clipboard`.
+Every capture also posts a notification with an image preview. Saved captures
+show their path and open it with `xdg-open` when the notification is activated;
+clipboard captures are preview-only. Custom bindings override matching defaults
+and are additive otherwise; these actions use `dispatch = "screenshot"` with
+arguments `region|output|window` and `save|clipboard`.
 
 ## Window appearance
 
