@@ -1173,3 +1173,6 @@ mod tile_tests;
 
 #[path = "workspace_navigation_tests.rs"]
 mod workspace_navigation_tests;
+
+#[path = "drag_tests.rs"]
+mod drag_tests;

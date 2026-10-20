@@ -17,11 +17,11 @@ delegate_noop!(Client: ignore xdg_positioner::XdgPositioner);
 delegate_noop!(Client: ignore wl_subcompositor::WlSubcompositor);
 delegate_noop!(Client: ignore wl_subsurface::WlSubsurface);
 
-fn scene_pixels(state: &Villain, renderer: &mut GlesRenderer) -> Vec<u8> {
+pub(super) fn scene_pixels(state: &Villain, renderer: &mut GlesRenderer) -> Vec<u8> {
     use crate::appearance::render::{EffectsRenderer, SceneLayers};
     use smithay::utils::{Rectangle, Transform};
     let elements = EffectsRenderer::default()
-        .scene(state, renderer, 0, SceneLayers::None)
+        .scene(state, renderer, 0, SceneLayers::All)
         .unwrap();
     let mut texture: GlesTexture = renderer
         .create_buffer(Fourcc::Abgr8888, (800, 600).into())

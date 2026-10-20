@@ -35,6 +35,7 @@ struct CursorFrame {
 pub struct CursorState {
     image: CursorImageStatus,
     split_override: bool,
+    interaction_override: Option<CursorIcon>,
     screenshot_override: bool,
     image_since: Duration,
     theme: xcursor::CursorTheme,
@@ -54,6 +55,7 @@ impl CursorState {
         Self {
             image: CursorImageStatus::default_named(),
             split_override: false,
+            interaction_override: None,
             screenshot_override: false,
             image_since: Duration::ZERO,
             theme: xcursor::CursorTheme::load(&theme_name),
@@ -63,6 +65,9 @@ impl CursorState {
         }
     }
 
+    pub(crate) fn set_interaction_override(&mut self, icon: Option<CursorIcon>) {
+        self.interaction_override = icon;
+    }
     pub fn set_split_override(&mut self, active: bool) {
         self.split_override = active;
     }
@@ -74,6 +79,8 @@ impl CursorState {
     fn effective_image(&self) -> CursorImageStatus {
         if self.screenshot_override {
             CursorImageStatus::Named(CursorIcon::Crosshair)
+        } else if let Some(icon) = self.interaction_override {
+            CursorImageStatus::Named(icon)
         } else if self.split_override {
             CursorImageStatus::Named(CursorIcon::ColResize)
         } else {

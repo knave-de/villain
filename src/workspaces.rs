@@ -16,6 +16,8 @@ use smithay::{
     xwayland::X11Surface,
 };
 use std::process::Command;
+mod drag_layout;
+use drag_layout::weighted_heights;
 
 #[derive(Default)]
 pub struct Workspace {
@@ -35,6 +37,9 @@ struct WorkspaceWindow {
     initial_focus_pending: bool,
     parent: Option<WindowId>,
     floating: Option<Rectangle<i32, smithay::utils::Logical>>,
+    stack_weight: u32,
+    floating_override: Option<bool>,
+    saved_floating: Option<Geometry>,
 }
 
 #[derive(Clone, Copy)]
@@ -188,6 +193,9 @@ impl Villain {
             .flat_map(|workspace| workspace.windows.iter())
             .find(|entry| entry.id == id)
             .map(|entry| entry.window.clone())
+    }
+    pub(crate) fn master_override(&self) -> Option<u16> {
+        self.workspaces[self.active_workspace].master_ratio
     }
     pub(crate) fn master_ratio(&self, index: usize) -> u16 {
         self.workspaces[index]
@@ -410,6 +418,7 @@ impl Villain {
         let parent_id = parent.map(|(_, id)| id);
         changed |= entry.parent != parent_id;
         entry.parent = parent_id;
+        let floating = entry.floating_override.unwrap_or(floating);
         let geometry = if floating {
             let geometry = entry.floating.unwrap_or_else(|| {
                 let natural = window.geometry().size;
@@ -481,7 +490,22 @@ impl Villain {
         } else {
             usable
         };
-        let mut tiles = master_stack_layout(area.size, count, self.master_ratio(index)).into_iter();
+        let weights: Vec<_> = workspace
+            .windows
+            .iter()
+            .filter(|entry| !entry.minimized && entry.floating.is_none())
+            .skip(1)
+            .map(|entry| entry.stack_weight)
+            .collect();
+        let mut layout = master_stack_layout(area.size, count, self.master_ratio(index));
+        let heights = weighted_heights(area.size.h, &weights);
+        let mut y = 0;
+        for (tile, height) in layout.iter_mut().skip(1).zip(heights) {
+            tile.0.y = y;
+            tile.1.h = height;
+            y += height;
+        }
+        let mut tiles = layout.into_iter();
         let mut result = Vec::new();
         for entry in &workspace.windows {
             let is_fullscreen = workspace.fullscreen == Some(entry.id);
@@ -591,6 +615,9 @@ impl Villain {
             fullscreen,
             "window fullscreen state changed"
         );
+        if index == self.active_workspace {
+            self.release_pointer_buttons();
+        }
         if fullscreen {
             self.workspaces[index].fullscreen = Some(id);
         } else if self.workspaces[index].fullscreen == Some(id) {
@@ -619,6 +646,9 @@ impl Villain {
             }
             return;
         }
+        if index == self.active_workspace {
+            self.release_pointer_buttons();
+        }
         if maximized {
             self.workspaces[index].maximized = Some(id);
         } else {
@@ -642,7 +672,7 @@ impl Villain {
         true
     }
 
-    fn floating_placement(&self, rect: Geometry) -> Geometry {
+    pub(crate) fn floating_placement(&self, rect: Geometry) -> Geometry {
         let appearance = &self.config.appearance;
         let view = appearance.views.floating;
         if (!view.gaps || appearance.gaps.outer == Default::default())
@@ -815,7 +845,7 @@ impl Villain {
         }
     }
 
-    fn window_surface(
+    pub(crate) fn window_surface(
         window: &Window,
     ) -> Option<smithay::reexports::wayland_server::protocol::wl_surface::WlSurface> {
         window.wl_surface().map(|surface| surface.into_owned())
@@ -840,6 +870,9 @@ impl Villain {
             initial_focus_pending: true,
             parent: None,
             floating: None,
+            stack_weight: 10000,
+            floating_override: None,
+            saved_floating: None,
         });
         self.refresh_window_hints(&window);
         tracing::info!(window = id.0, workspace = index + 1, "window opened");
@@ -939,6 +972,12 @@ impl Villain {
     }
 
     pub fn relayout_active_workspace(&mut self) {
+        if self.interaction.is_some() {
+            self.cancel_window_interaction();
+            self.pointer
+                .clone()
+                .unset_grab(self, SERIAL_COUNTER.next_serial(), 0);
+        }
         self.desktop_state_dirty = true;
         // Empty workspaces have no client commits to wake the output after
         // a switch or the last window's destruction.
@@ -970,7 +1009,8 @@ impl Villain {
         self.restore_active_workspace_focus();
     }
 
-    fn map_active_workspace(&mut self) {
+    pub(crate) fn map_active_workspace(&mut self) {
+        self.normalize_stack_weights();
         self.arrange_layers();
         let old: Vec<_> = self
             .workspaces
@@ -1033,6 +1073,9 @@ impl Villain {
                 }
             }
             WindowAction::Minimize => {
+                if self.workspace_for_window(window) == Some(self.active_workspace) {
+                    self.release_pointer_buttons();
+                }
                 let mut changed_active_workspace = false;
                 for (index, workspace) in self.workspaces.iter_mut().enumerate() {
                     let Some(entry) = workspace
@@ -1401,7 +1444,7 @@ impl Villain {
         }
     }
 
-    fn window_id(&self, window: &Window) -> Option<WindowId> {
+    pub(crate) fn window_id(&self, window: &Window) -> Option<WindowId> {
         self.workspaces
             .iter()
             .flat_map(|workspace| workspace.windows.iter())
@@ -1461,7 +1504,7 @@ impl Villain {
             })
     }
 
-    fn focus_managed_window(&mut self, window: &Window) -> bool {
+    pub(crate) fn focus_managed_window(&mut self, window: &Window) -> bool {
         self.apply_managed_focus(window, true)
     }
 
@@ -1579,7 +1622,11 @@ impl Villain {
             .cloned()
     }
 
-    fn input_shape(&self, window: &Window, rect: Geometry) -> (Geometry, [f32; 4], [f32; 4]) {
+    pub(crate) fn input_shape(
+        &self,
+        window: &Window,
+        rect: Geometry,
+    ) -> (Geometry, [f32; 4], [f32; 4]) {
         let view = self
             .workspaces
             .iter()
@@ -1634,7 +1681,9 @@ impl Villain {
         (outer, radii, inner)
     }
 
-    fn input_window_at_pointer(&self) -> Option<(Window, Point<i32, smithay::utils::Logical>)> {
+    pub(crate) fn input_window_at_pointer(
+        &self,
+    ) -> Option<(Window, Point<i32, smithay::utils::Logical>)> {
         // Match rendered bounds while a client retains an old or oversized buffer.
         let layout = self.workspace_layout(self.active_workspace);
         for window in self.space.elements().rev() {
@@ -1770,6 +1819,7 @@ impl Villain {
     }
     /// End any drag before focus moves away from its application.
     pub fn release_pointer_buttons(&mut self) {
+        self.cancel_window_interaction();
         let pointer = self.pointer.clone();
         for button in std::mem::take(&mut self.pressed_buttons) {
             pointer.button(
@@ -1855,6 +1905,7 @@ impl Villain {
         pointer.frame(self);
         let split_cursor = self.split_drag_active || self.split_under_pointer().is_some();
         self.cursor.set_split_override(split_cursor);
+        self.update_interaction_cursor();
     }
 
     pub fn remove_window(&mut self, surface: &ToplevelSurface) {
@@ -2059,3 +2110,8 @@ mod tests {
 #[cfg(test)]
 #[path = "window_tests.rs"]
 mod request_tests;
+
+pub(crate) fn stack_slot_heights(state: &Villain, weights: &[(WindowId, u32)]) -> Vec<i32> {
+    let height = state.split_context().map(|c| c.area.size.h).unwrap_or(1);
+    weighted_heights(height, &weights.iter().map(|(_, w)| *w).collect::<Vec<_>>())
+}

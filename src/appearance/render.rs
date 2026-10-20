@@ -16,6 +16,7 @@ use smithay::{
             damage::OutputDamageTracker,
             element::{
                 AsRenderElements, Element, Id, Kind,
+                solid::SolidColorRenderElement,
                 surface::{WaylandSurfaceRenderElement, render_elements_from_surface_tree},
                 texture::{TextureBuffer, TextureRenderElement},
                 utils::{CropRenderElement, Relocate, RelocateRenderElement},
@@ -37,6 +38,7 @@ use std::collections::VecDeque;
 smithay::backend::renderer::element::render_elements! {
     pub EffectElement<=GlesRenderer>;
     Surface=WaylandSurfaceRenderElement<GlesRenderer>,
+    Solid=SolidColorRenderElement,
     CroppedSurface=CropRenderElement<WaylandSurfaceRenderElement<GlesRenderer>>,
     Shape=PixelShaderElement,
     Texture=TextureRenderElement<GlesTexture>,
@@ -176,13 +178,72 @@ impl EffectsRenderer {
         workspace: usize,
         layers: SceneLayers,
     ) -> Result<Vec<EffectElement>, EffectError> {
+        let mut elements = self.base_scene(state, renderer, workspace, layers)?;
+        if workspace == state.active_workspace
+            && layers == SceneLayers::All
+            && let Some(drag) = &state.interaction
+            && drag.moved
+            && let crate::window_grab::Operation::Tile {
+                geometry,
+                destination,
+                ..
+            } = &drag.operation
+        {
+            let target = destination.as_ref().and_then(|target| {
+                state
+                    .tiled_slots()
+                    .into_iter()
+                    .find(|(w, _)| w == target)
+                    .map(|(_, rect)| rect)
+            });
+            for (index, rect) in [Some(*geometry), target].into_iter().enumerate() {
+                if let Some(rect) = rect {
+                    elements.insert(
+                        0,
+                        EffectElement::Solid(SolidColorRenderElement::new(
+                            state.drag_marker_ids[index].clone(),
+                            rect.to_physical_precise_round(1.0),
+                            CommitCounter::default(),
+                            if index == 0 {
+                                [0.04, 0.07, 0.12, 0.18]
+                            } else {
+                                [0.06, 0.20, 0.32, 0.32]
+                            },
+                            Kind::Unspecified,
+                        )),
+                    );
+                }
+            }
+        }
+        Ok(elements)
+    }
+    fn base_scene(
+        &mut self,
+        state: &Villain,
+        renderer: &mut GlesRenderer,
+        workspace: usize,
+        layers: SceneLayers,
+    ) -> Result<Vec<EffectElement>, EffectError> {
         let size = state.output_size;
         let focused = state.keyboard.current_focus();
-        let windows: Vec<_> = state
+        let mut windows: Vec<_> = state
             .workspace_layout(workspace)
             .into_iter()
             .filter(|entry| entry.5 && !(layers == SceneLayers::All && state.overview_mapped()))
             .collect();
+        if workspace == state.active_workspace
+            && layers == SceneLayers::All
+            && let Some(drag) = &state.interaction
+            && drag.moved
+            && let crate::window_grab::Operation::Tile {
+                window, geometry, ..
+            } = &drag.operation
+            && let Some(index) = windows.iter().position(|entry| entry.0 == *window)
+        {
+            let mut lifted = windows.remove(index);
+            lifted.1 = Rectangle::new(geometry.loc + drag.delta, geometry.size);
+            windows.push(lifted);
+        }
         let mut key = SceneKey {
             workspace,
             layers,

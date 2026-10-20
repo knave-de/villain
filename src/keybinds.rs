@@ -18,11 +18,13 @@ use crate::{
 enum KeyboardAction {
     Dispatch(Dispatch),
     Vt(i32),
+    FinishInteraction(bool),
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 enum BindingKey {
     Keysym(u32),
+    Mouse(u32),
     Modifier(Modkey),
 }
 
@@ -84,8 +86,11 @@ impl KeybindRegistry {
     fn default_specs() -> Vec<BindSpec> {
         let mut specs = vec![
             spec("MOD", "toggle-overview", &[]),
+            spec("MOD+BUTTON_LEFT", "move-window", &["pointer"]),
+            spec("MOD+BUTTON_RIGHT", "resize-window", &["pointer"]),
             spec("MOD+RETURN", "exec", &["kitty"]),
             spec("MOD+Q", "close", &[]),
+            spec("MOD+V", "toggle-floating", &[]),
             spec("MOD+F", "toggle-maximize", &[]),
             spec("MOD+CTRL+LEFT", "resize-master", &["-5"]),
             spec("MOD+CTRL+RIGHT", "resize-master", &["5"]),
@@ -160,6 +165,23 @@ impl KeybindRegistry {
             .map(|binding| binding.dispatch.clone())
     }
 
+    pub(crate) fn find_mouse(
+        &self,
+        button: u32,
+        mods: smithay::input::keyboard::ModifiersState,
+    ) -> Option<Dispatch> {
+        self.bindings
+            .iter()
+            .find(|binding| {
+                binding.keys.key == BindingKey::Mouse(button)
+                    && binding.keys.ctrl == mods.ctrl
+                    && binding.keys.alt == mods.alt
+                    && binding.keys.shift == mods.shift
+                    && binding.keys.super_key == mods.logo
+            })
+            .map(|binding| binding.dispatch.clone())
+    }
+
     fn find_binding(
         &self,
         raw_syms: &[Keysym],
@@ -181,6 +203,7 @@ impl KeybindRegistry {
 impl BindingKey {
     fn matches(self, raw_syms: &[Keysym]) -> bool {
         raw_syms.iter().any(|symbol| match self {
+            Self::Mouse(_) => false,
             Self::Keysym(expected) => {
                 symbol.raw() == expected
                     || (expected == keysyms::KEY_Tab && symbol.raw() == keysyms::KEY_ISO_Left_Tab)
@@ -250,6 +273,9 @@ fn parse_keys(value: &str, modkey: Modkey) -> Result<KeyCombination, String> {
         }
     }
     let key = match key {
+        Some(key) if key.eq_ignore_ascii_case("BUTTON_LEFT") => BindingKey::Mouse(0x110),
+        Some(key) if key.eq_ignore_ascii_case("BUTTON_RIGHT") => BindingKey::Mouse(0x111),
+        Some(key) if key.eq_ignore_ascii_case("BUTTON_MIDDLE") => BindingKey::Mouse(0x112),
         Some(key) => {
             let canonical = match key.to_ascii_uppercase().as_str() {
                 "ENTER" => "Return",
@@ -277,6 +303,22 @@ fn parse_keys(value: &str, modkey: Modkey) -> Result<KeyCombination, String> {
 
 fn parse_dispatch(spec: &BindSpec) -> Result<Dispatch, String> {
     match spec.dispatch.as_str() {
+        "move-window" | "resize-window" => {
+            let target = match spec.args.as_slice() {
+                [] => knave_desktop_api::WindowTarget::Focused,
+                [value] if value == "pointer" => knave_desktop_api::WindowTarget::Pointer,
+                _ => {
+                    return Err(
+                        "move-window/resize-window accepts only optional pointer target".into(),
+                    );
+                }
+            };
+            Ok(if spec.dispatch == "move-window" {
+                Dispatch::MoveWindow(target)
+            } else {
+                Dispatch::ResizeWindow(target, None)
+            })
+        }
         "screenshot" if spec.args.len() == 2 => {
             let mode = match spec.args[0].as_str() {
                 "region" => crate::screenshot::ScreenshotMode::Region,
@@ -304,6 +346,7 @@ fn parse_dispatch(spec: &BindSpec) -> Result<Dispatch, String> {
         "resize-master" => Err("resize-master requires exactly one argument".into()),
         "reset-master" if spec.args.is_empty() => Ok(Dispatch::ResetMaster),
         "reset-master" => Err("reset-master does not accept arguments".into()),
+        "toggle-floating" if spec.args.is_empty() => Ok(Dispatch::ToggleFloatingFocused),
         "close" if spec.args.is_empty() => Ok(Dispatch::CloseFocused),
         "maximize" if spec.args.is_empty() => Ok(Dispatch::MaximizeFocused),
         "unmaximize" if spec.args.is_empty() => Ok(Dispatch::UnmaximizeFocused),
@@ -341,8 +384,8 @@ fn parse_dispatch(spec: &BindSpec) -> Result<Dispatch, String> {
             }
             Ok(Dispatch::FocusWorkspace(workspace))
         }
-        "maximize" | "unmaximize" | "toggle-maximize" | "close" | "minimize"
-        | "restore-minimized" | "previous-workspace" | "next-workspace" | "quit"
+        "toggle-floating" | "maximize" | "unmaximize" | "toggle-maximize" | "close"
+        | "minimize" | "restore-minimized" | "previous-workspace" | "next-workspace" | "quit"
         | "toggle-overview" | "focus-next" | "focus-previous" | "focus-left" | "focus-right"
         | "focus-up" | "focus-down" => Err("dispatch does not accept arguments".into()),
         "exec" => Err("exec requires a program in args".into()),
@@ -394,6 +437,30 @@ pub(crate) fn handle_keyboard_key(
                         .any(|symbol| symbol.raw() == keysyms::KEY_Escape)
                     {
                         crate::screenshot::keyboard_key(state, keysyms::KEY_Escape, true);
+                    }
+                }
+                return FilterResult::Intercept(None);
+            }
+            if state.interaction.is_some() {
+                if pressed {
+                    state.suppressed_keys.insert(code);
+                    if key
+                        .raw_syms()
+                        .iter()
+                        .any(|s| s.raw() == keysyms::KEY_Escape)
+                    {
+                        return FilterResult::Intercept(Some(KeyboardAction::FinishInteraction(
+                            false,
+                        )));
+                    }
+                    if key
+                        .raw_syms()
+                        .iter()
+                        .any(|s| s.raw() == keysyms::KEY_Return)
+                    {
+                        return FilterResult::Intercept(Some(KeyboardAction::FinishInteraction(
+                            true,
+                        )));
                     }
                 }
                 return FilterResult::Intercept(None);
@@ -482,6 +549,7 @@ pub(crate) fn handle_keyboard_key(
         }
     };
     match action {
+        Some(KeyboardAction::FinishInteraction(commit)) => state.finish_interaction_key(commit),
         Some(KeyboardAction::Dispatch(dispatch)) => {
             if let Err(error) = state.dispatch(dispatch) {
                 tracing::debug!(%error, "keybind dispatch had no effect");
@@ -502,6 +570,44 @@ pub(crate) fn handle_keyboard_key(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mouse_bindings_use_modkey_and_can_be_overridden() {
+        let registry = KeybindRegistry::defaults("Alt").unwrap();
+        let mut mods = smithay::input::keyboard::ModifiersState {
+            alt: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            registry.find_mouse(0x110, mods),
+            Some(Dispatch::MoveWindow(
+                knave_desktop_api::WindowTarget::Pointer
+            ))
+        );
+        assert_eq!(
+            registry.find_mouse(0x111, mods),
+            Some(Dispatch::ResizeWindow(
+                knave_desktop_api::WindowTarget::Pointer,
+                None
+            ))
+        );
+        mods.alt = false;
+        assert!(registry.find_mouse(0x110, mods).is_none());
+        let registry = KeybindRegistry::with_overrides(
+            "Super",
+            &[spec("MOD+BUTTON_LEFT", "resize-window", &["pointer"])],
+        )
+        .unwrap();
+        mods.logo = true;
+        assert_eq!(
+            registry.find_mouse(0x110, mods),
+            Some(Dispatch::ResizeWindow(
+                knave_desktop_api::WindowTarget::Pointer,
+                None
+            ))
+        );
+        assert!(parse_keys("MOD+BUTTON_UNKNOWN", Modkey::Super).is_err());
+    }
 
     #[test]
     fn resize_bindings_validate_delta_and_resolve_modkey() {

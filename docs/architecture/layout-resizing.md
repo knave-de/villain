@@ -3,8 +3,7 @@
 Villain owns the per-workspace master ratio, divider hit testing, pointer grab,
 keyboard actions and window geometry. Knave owns the optional
 `[compositor] master_percent` setting (integer 10..90, default 50). The Shell
-and desktop contract are unchanged. Individual stack dividers are outside this
-slice. Villain pins knave-config at `d051735bca26affc370467779dbb1f625cac6318`.
+and desktop contract are unchanged. Horizontal stack dividers now resize adjacent stack pairs; see Knave ADR 0013. Villain pins knave-config at `d051735bca26affc370467779dbb1f625cac6318`.
 
 The runtime ratio uses basis points for smooth dragging. An unset workspace
 override follows configuration; a manual drag or key adjustment preserves its
@@ -21,8 +20,7 @@ uses the panel-excluding usable area. Dialogs, popups, exclusive shell surfaces,
 existing grabs and expanded layouts cannot start a split drag. Window placement
 runs separately from pointer refresh to avoid re-entering Smithay's pointer
 lock from the grab. Workspace changes, changed tiled membership, changed usable
-area, focus loss, configuration reload and button release end the drag. The
-chosen ratio survives cancellation. Both Winit and direct input enter the same
+area, focus loss, configuration reload and button release end the drag. Escape and lifecycle cancellation restore the initial ratio. Both Winit and direct input enter the same
 handler; floating-window grabs retain their existing path.
 
 `resize-master` takes one signed integer percentage-point delta (-80..-1 or
