@@ -116,18 +116,11 @@ pub fn init_winit(
                 ) {
                     return;
                 }
-                match event.state() {
-                    smithay::backend::input::ButtonState::Pressed => {
-                        state.pressed_buttons.insert(event.button_code());
-                    }
-                    smithay::backend::input::ButtonState::Released => {
-                        if !state.pressed_buttons.remove(&event.button_code()) {
-                            return;
-                        }
-                    }
-                }
-                if state.try_start_split_drag(event.button_code(), event.state(), event.time_msec())
-                {
+                if state.handle_compositor_button(
+                    event.button_code(),
+                    event.state(),
+                    event.time_msec(),
+                ) {
                     return;
                 }
                 state.refresh_pointer_and_focus(event.time_msec());
@@ -142,6 +135,7 @@ pub fn init_winit(
                     },
                 );
                 pointer.frame(state);
+                state.update_interaction_cursor();
             }
             WinitEvent::Input(InputEvent::PointerAxis { event }) => {
                 if state.screenshot.intercepting_pointer() {

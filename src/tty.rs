@@ -333,6 +333,7 @@ fn process_input(event: InputEvent<LibinputInputBackend>, state: &mut Villain) {
             }
         }
         InputEvent::DeviceRemoved { device } => {
+            state.release_pointer_buttons();
             state.swipe_device_removed(&smithay::backend::input::Device::id(&device));
             if let Some(tty) = state.tty.as_mut() {
                 tty.input_devices.retain(|candidate| candidate != &device);
@@ -374,17 +375,8 @@ fn process_input(event: InputEvent<LibinputInputBackend>, state: &mut Villain) {
             ) {
                 return;
             }
-            match event.state() {
-                ButtonState::Pressed => {
-                    state.pressed_buttons.insert(event.button_code());
-                }
-                ButtonState::Released => {
-                    if !state.pressed_buttons.remove(&event.button_code()) {
-                        return;
-                    }
-                }
-            }
-            if state.try_start_split_drag(event.button_code(), event.state(), event.time_msec()) {
+            if state.handle_compositor_button(event.button_code(), event.state(), event.time_msec())
+            {
                 return;
             }
             state.refresh_pointer_and_focus(event.time_msec());
@@ -399,6 +391,7 @@ fn process_input(event: InputEvent<LibinputInputBackend>, state: &mut Villain) {
                 },
             );
             pointer.frame(state);
+            state.update_interaction_cursor();
         }
         InputEvent::PointerAxis { event } => {
             if state.screenshot.intercepting_pointer() {

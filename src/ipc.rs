@@ -341,6 +341,7 @@ fn dispatch_error(error: DispatchError) -> DesktopResponse {
         DispatchError::NoFocusedWindow
         | DispatchError::NoMinimizedWindow
         | DispatchError::MinimizedWindow(_) => DesktopErrorCode::Unavailable,
+        DispatchError::Interaction(_) => DesktopErrorCode::Unavailable,
         DispatchError::Config(_)
         | DispatchError::EmptyCommand
         | DispatchError::Spawn(_)

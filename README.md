@@ -199,9 +199,40 @@ dispatch = "reset-master"
 Run `knavectl reload` after editing. Resizing is per workspace and lasts
 until reset or restart; reload preserves manual overrides. The percentage is
 clamped to 10–90%. Resize actions do nothing with fewer than two tiled windows
-or while a maximized/fullscreen window covers the layout. Floating windows and
-individual stack dividers are unchanged. These are Villain keybinding actions,
+or while a maximized/fullscreen window covers the layout. These are Villain keybinding actions,
 not new desktop IPC commands.
+
+## Moving and resizing windows
+
+- `MOD+left drag` moves floating windows or picks up live tiled windows. Drop a
+  tile onto another tile to swap positions; Escape or an invalid drop returns it.
+- `MOD+right drag` resizes a floating window from the nearest corner, or adjusts
+  the tiled master/stack ratio. Floating borders/corners also resize with an
+  unmodified left drag, including a five-pixel exterior hit margin.
+- Drag a horizontal divider between stack windows to change only those two
+  heights. Other stack windows retain their heights. Proportions survive workspace
+  switches and expanded states and reset on restart.
+- `MOD+V` toggles the focused window between tiled and floating, remembering its
+  floating rectangle and position in the tiled order.
+
+Custom `[[compositor.bind]]` entries accept `BUTTON_LEFT`, `BUTTON_RIGHT`, and
+`BUTTON_MIDDLE` alongside keyboard keys, for example:
+
+```toml
+[[compositor.bind]]
+keys = "MOD+BUTTON_LEFT"
+dispatch = "move-window"
+args = ["pointer"]
+```
+
+`move-window`, `resize-window` and `toggle-floating` are binding actions and
+`knavectl dispatch` commands. Keyboard/CLI move and resize default to the focused
+window and enter a modal interaction: move the pointer, left click or Enter to
+commit, Escape to cancel. CLI selectors are `--target pointer` or `--window ID`;
+`resize-window --edge top-left` selects a floating edge/corner explicitly. Resize
+without an edge chooses the nearest corner. CLI acknowledgement means the
+interaction started, not that it has finished. Restore maximized/fullscreen
+windows before dragging. No operation changes workspaces in this feature.
 
 ## Screenshots
 

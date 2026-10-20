@@ -2,7 +2,7 @@
 
 use std::{fmt, io};
 
-use knave_desktop_api::{DesktopCommand, WindowId};
+use knave_desktop_api::{DesktopCommand, ResizeEdge, WindowId, WindowTarget};
 
 use crate::{state::Villain, workspace_navigation::Direction};
 
@@ -24,6 +24,9 @@ pub enum FocusDirection {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Dispatch {
+    ToggleFloatingFocused,
+    MoveWindow(WindowTarget),
+    ResizeWindow(WindowTarget, Option<ResizeEdge>),
     ReloadConfig,
     ResizeMaster(i16),
     ResetMaster,
@@ -53,6 +56,9 @@ pub enum Dispatch {
 impl From<DesktopCommand> for Dispatch {
     fn from(request: DesktopCommand) -> Self {
         match request {
+            DesktopCommand::ToggleFloatingFocused => Self::ToggleFloatingFocused,
+            DesktopCommand::MoveWindow { target } => Self::MoveWindow(target),
+            DesktopCommand::ResizeWindow { target, edge } => Self::ResizeWindow(target, edge),
             DesktopCommand::ReloadConfiguration => Self::ReloadConfig,
             DesktopCommand::CloseFocused => Self::CloseFocused,
             DesktopCommand::MaximizeFocused => Self::MaximizeFocused,
@@ -74,6 +80,7 @@ impl From<DesktopCommand> for Dispatch {
 
 #[derive(Debug)]
 pub enum DispatchError {
+    Interaction(&'static str),
     Config(String),
     NoFocusedWindow,
     NoMinimizedWindow,
@@ -88,6 +95,7 @@ pub enum DispatchError {
 impl fmt::Display for DispatchError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Interaction(message) => formatter.write_str(message),
             Self::Config(error) => write!(formatter, "configuration reload failed: {error}"),
             Self::NoFocusedWindow => write!(formatter, "no window is focused"),
             Self::NoMinimizedWindow => write!(formatter, "no minimized window to restore"),
@@ -114,6 +122,11 @@ impl std::error::Error for DispatchError {}
 impl Villain {
     pub fn dispatch(&mut self, dispatch: Dispatch) -> Result<(), DispatchError> {
         match dispatch {
+            Dispatch::ToggleFloatingFocused => self.toggle_floating_focused(),
+            Dispatch::MoveWindow(target) => self.begin_window_interaction(target, false, None),
+            Dispatch::ResizeWindow(target, edge) => {
+                self.begin_window_interaction(target, true, edge)
+            }
             Dispatch::ReloadConfig => {
                 let config = self
                     .config
@@ -232,6 +245,7 @@ impl Villain {
 
     fn set_overview_visible(&mut self, visible: bool) {
         if self.overview_visible != visible {
+            self.release_pointer_buttons();
             if !visible {
                 for entry in &mut self.shell_surfaces {
                     if entry.mapped && entry.layer.namespace() == "knave-shell-overview" {
