@@ -11,12 +11,46 @@ master_percent = 50
 focus_cycle_order = "layout"
 environment_file = "environment"
 
+# Workspace switches slide windows and wallpaper for 160 ms with cubic ease-out.
+# Focus changes immediately; panels stay stationary. A click or scroll finishes
+# the transition before input is delivered. Duration, easing and style are fixed;
+# there are currently no compositor animation settings. Overview browsing is separate.
+
+# Opt in to skipping empty slots for next/previous shortcuts and workspace swipes.
+# Number shortcuts and bar clicks can still select any workspace.
+[compositor.workspace]
+skip_empty = false
+
 [compositor.input]
 tap_to_click = true
 natural_scroll = true
 # Focus the window under the pointer while it moves. Set to false to
 # switch window focus on click only.
 focus_follows_mouse = true
+
+# Optional per-device overrides. `name` matches the runtime libinput device
+# name case-insensitively and supports the `*` and `?` wildcards. Unset fields
+# keep the libinput value. Later rules override earlier ones for the same
+# device. `enabled = false` stops events without detaching the device.
+#
+# [[compositor.device]]
+# name = "Example Touchpad"
+# tap_to_click = true
+# natural_scroll = false
+# sensitivity = 0.4
+# disable_while_typing = true
+#
+# [[compositor.device]]
+# name = "*Receiver Mouse"
+# enabled = false
+
+# Gesture entries override only matching fingers+direction; later entries win.
+# Default: three-finger horizontal swipe switches workspaces. Use action = "none"
+# to pass that gesture to clients. These are Villain actions, not knavectl commands.
+# [[compositor.gesture.bind]]
+# fingers = 3
+# direction = "horizontal"
+# action = "none"
 
 # Screenshots save under ~/Pictures/Screenshots and post a notification with
 # an image preview. `PRINT` selects a region, `SHIFT+PRINT` captures the
@@ -89,6 +123,16 @@ dispatch = "toggle-floating"
 # Floating edges/corners and tiled dividers resize with an unmodified left drag.
 # Horizontal stack dividers resize only their two neighbors. No binding is needed.
 # Drag thresholds, hit margins and stack minimum heights currently have no setting.
+
+# Built-in workspace navigation. MOD follows modkey above.
+# Next/previous keep their slide direction through wrapping and skipped empty slots.
+# Number shortcuts MOD+1 through MOD+9 and MOD+0 select workspaces 1 through 10.
+# [[compositor.bind]]
+# keys = "MOD+RIGHT"
+# dispatch = "next-workspace"
+# [[compositor.bind]]
+# keys = "MOD+LEFT"
+# dispatch = "previous-workspace"
 
 # Return to the last workspace used; replace this combination to override it.
 # TILDE and ~ are aliases for GRAVE (no Shift required).
