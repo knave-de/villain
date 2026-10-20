@@ -10,7 +10,7 @@ members = []
 resolver = "3"
 
 [dependencies]
-knave-capture-protocol = { git = "https://github.com/knave-de/knave.git", rev = "2adca33a0d537920fc338d0eb418f8581f0d8a76", features = ["server"] }
+knave-capture-protocol = { git = "https://github.com/knave-de/knave.git", rev = "a60c16b7e7270dce4740ff700820114b963e31e5", features = ["server"] }
 libc = "0.2"
 toml = "0.9"
 smithay = { version = "0.7.0", default-features = false, features = [
@@ -27,8 +27,8 @@ smithay = { version = "0.7.0", default-features = false, features = [
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 xcursor = "0.3.11"
-knave-desktop-api = { git = "https://github.com/knave-de/knave.git", rev = "2adca33a0d537920fc338d0eb418f8581f0d8a76" }
-knave-config = { git = "https://github.com/knave-de/knave.git", rev = "2adca33a0d537920fc338d0eb418f8581f0d8a76" }
+knave-desktop-api = { git = "https://github.com/knave-de/knave.git", rev = "a60c16b7e7270dce4740ff700820114b963e31e5" }
+knave-config = { git = "https://github.com/knave-de/knave.git", rev = "a60c16b7e7270dce4740ff700820114b963e31e5" }
 serde_json = "1"
 base64 = "0.22"
 png = "0.18"
