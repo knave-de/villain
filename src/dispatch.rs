@@ -38,6 +38,7 @@ pub enum Dispatch {
     RestoreLastMinimized,
     FocusWorkspace(usize),
     PreviousWorkspace,
+    LastWorkspace,
     NextWorkspace,
     FocusWindow(WindowId),
     RestoreWindow(WindowId),
@@ -190,6 +191,12 @@ impl Villain {
                 if let Some(target) =
                     self.workspace_target(self.active_workspace, Direction::Previous)
                 {
+                    self.switch_workspace(target);
+                }
+                Ok(())
+            }
+            Dispatch::LastWorkspace => {
+                if let Some(target) = self.last_workspace {
                     self.switch_workspace(target);
                 }
                 Ok(())

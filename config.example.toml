@@ -89,3 +89,9 @@ dispatch = "toggle-floating"
 # Floating edges/corners and tiled dividers resize with an unmodified left drag.
 # Horizontal stack dividers resize only their two neighbors. No binding is needed.
 # Drag thresholds, hit margins and stack minimum heights currently have no setting.
+
+# Return to the last workspace used; replace this combination to override it.
+# TILDE and ~ are aliases for GRAVE (no Shift required).
+[[compositor.bind]]
+keys = "MOD+GRAVE"
+dispatch = "last-workspace"

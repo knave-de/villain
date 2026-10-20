@@ -134,6 +134,28 @@ focus_cycle_order = "layout" # or "mru"
 focus_follows_mouse = true # false switches focus on click only
 ```
 
+## Last workspace
+
+`MOD+grave` (the grave/tilde key, without Shift) returns to the last workspace
+used. Repeated presses toggle between the two most recent workspaces, including
+empty ones regardless of `compositor.workspace.skip_empty`. Selecting the active
+workspace again preserves history; before the first switch this shortcut does
+nothing. History lasts for the compositor session. `MOD+Left/Right` still navigate
+in workspace order.
+
+Override the shortcut in `~/.config/knave/config.toml`, then run `knavectl reload`:
+
+```toml
+[[compositor.bind]]
+keys = "MOD+GRAVE" # TILDE and ~ are aliases for GRAVE
+dispatch = "workspace"
+args = ["1"]
+
+[[compositor.bind]]
+keys = "MOD+B"
+dispatch = "last-workspace"
+```
+
 ## Maximize and restore
 
 `MOD+F` toggles maximization in the default binding set. Maximized windows fill
