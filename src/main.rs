@@ -24,6 +24,7 @@ mod overview_render;
 mod preview;
 mod render;
 mod screenshot;
+mod screenshot_notification;
 mod session;
 mod shutdown;
 mod split_grab;
