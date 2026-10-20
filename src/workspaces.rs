@@ -979,10 +979,7 @@ impl Villain {
 
     pub fn relayout_active_workspace(&mut self) {
         if self.interaction.is_some() {
-            self.cancel_window_interaction();
-            self.pointer
-                .clone()
-                .unset_grab(self, SERIAL_COUNTER.next_serial(), 0);
+            self.release_pointer_buttons();
         }
         self.desktop_state_dirty = true;
         // Empty workspaces have no client commits to wake the output after
@@ -1909,6 +1906,9 @@ impl Villain {
             },
         );
         pointer.frame(self);
+        if std::mem::take(&mut self.interaction_cleanup_pending) {
+            self.release_pointer_buttons();
+        }
         let split_cursor = self.split_drag_active || self.split_under_pointer().is_some();
         self.cursor.set_split_override(split_cursor);
         self.update_interaction_cursor();

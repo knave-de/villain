@@ -129,6 +129,12 @@ fn desktop_drag_resize_and_floating_lifecycle() {
             button(s, 0x111, Released);
             key(s, 133, Up);
             assert!(!s.overview_visible, "MOD drag must not toggle overview");
+            button(s, 0x110, Pressed);
+            button(s, 0x110, Released);
+            assert!(
+                !s.pointer.is_grabbed(),
+                "extra drag button cannot leave the next normal click grabbed"
+            );
 
             // Modal IPC drag and Escape use the same lifecycle.
             let before = s.tiled_slots();
@@ -219,6 +225,23 @@ fn desktop_drag_resize_and_floating_lifecycle() {
             s.release_pointer_buttons();
             assert_eq!(s.floating_geometry(&floating), Some(resized));
             assert!(s.interaction.is_none() && !s.pointer.is_grabbed());
+            s.begin_window_interaction(WindowTarget::Window(id), false, None)
+                .unwrap();
+            button(s, 0x110, Pressed);
+            key(s, 9, Down);
+            key(s, 9, Up);
+            button(s, 0x110, Released);
+            motion(
+                s,
+                f64::from(resized.loc.x + 50),
+                f64::from(resized.loc.y + 50),
+            );
+            button(s, 0x110, Pressed);
+            button(s, 0x110, Released);
+            assert!(
+                !s.pointer.is_grabbed(),
+                "Escape with a held button cannot leave a later click grabbed"
+            );
             s.set_window_maximized(&floating, true);
             assert!(
                 s.begin_window_interaction(WindowTarget::Window(id), false, None)
@@ -245,7 +268,7 @@ fn desktop_drag_resize_and_floating_lifecycle() {
         queue.roundtrip(&mut client).unwrap();
         queue.roundtrip(&mut client).unwrap();
         assert_eq!(
-            client.pointer_buttons, 0,
+            client.pointer_buttons, 4,
             "compositor gestures must not leak buttons"
         );
     });

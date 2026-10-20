@@ -125,6 +125,14 @@ impl Villain {
         if state == ButtonState::Pressed {
             self.swallowed_buttons.remove(&button);
             self.pressed_buttons.insert(button);
+            if self
+                .interaction
+                .as_ref()
+                .is_some_and(|drag| drag.button.unwrap_or(0x110) != button)
+            {
+                self.swallowed_buttons.insert(button);
+                return true;
+            }
             let mods = self.keyboard.modifier_state();
             if mods.logo || mods.alt {
                 self.pending_modifier = None;
@@ -144,7 +152,12 @@ impl Villain {
             if !self.pressed_buttons.remove(&button) {
                 return true;
             }
-            if swallowed && self.interaction.is_none() {
+            if swallowed
+                && self
+                    .interaction
+                    .as_ref()
+                    .is_none_or(|drag| drag.button.unwrap_or(0x110) != button)
+            {
                 return true;
             }
         }
@@ -169,7 +182,9 @@ impl Villain {
         serial: Option<Serial>,
         edges: Option<ResizeEdges>,
     ) {
-        if serial.is_some_and(|serial| !self.pointer.has_grab(serial)) || self.interaction.is_some()
+        if serial.is_some_and(|serial| !self.pointer.has_grab(serial))
+            || self.interaction.is_some()
+            || self.pressed_buttons.len() != 1
         {
             return;
         }
@@ -609,9 +624,7 @@ impl Villain {
 
     pub(crate) fn finish_interaction_key(&mut self, commit: bool) {
         self.finish_window_interaction(commit);
-        self.pointer
-            .clone()
-            .unset_grab(self, SERIAL_COUNTER.next_serial(), 0);
+        self.release_pointer_buttons();
         self.refresh_pointer(0);
     }
 }
@@ -713,7 +726,9 @@ impl PointerGrab<Villain> for WindowGrab {
         handle.motion(data, None, event);
         data.interaction_motion(event.location);
         if data.interaction.is_none() {
-            handle.unset_grab(self, data, event.serial, event.time, true);
+            // The backend clears physical and Smithay button bookkeeping after
+            // leaving the pointer lock, while this grab still owns client input.
+            data.interaction_cleanup_pending = true;
         }
     }
     fn relative_motion(
