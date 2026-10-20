@@ -61,7 +61,7 @@ impl Villain {
                         window.send_frame(&output, now, None, |_, _| Some(output.clone()));
                     }
                     for index in 0..state.workspaces.len() {
-                        if !state.gestures.visible(index)
+                        if !state.workspace_scene_visible(index)
                             && !state
                                 .overview_panes
                                 .iter()

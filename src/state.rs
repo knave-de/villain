@@ -50,6 +50,7 @@ pub struct Villain {
 
     pub(crate) capture: crate::capture::CaptureState,
     pub(crate) gestures: crate::gestures::Gestures,
+    pub(crate) workspace_motion: crate::workspace_motion::WorkspaceMotion,
     pub(crate) screenshot: crate::screenshot::ScreenshotState,
     pub(crate) foreign_toplevel_state:
         smithay::wayland::foreign_toplevel_list::ForeignToplevelListState,
@@ -166,6 +167,7 @@ impl Villain {
             capture: crate::capture::CaptureState::default(),
             screenshot: crate::screenshot::ScreenshotState::default(),
             gestures: Default::default(),
+            workspace_motion: Default::default(),
             tty: None,
             winit: None,
             dmabuf_state: smithay::wayland::dmabuf::DmabufState::new(),

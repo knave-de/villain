@@ -122,6 +122,8 @@ impl Villain {
         state: ButtonState,
         time: u32,
     ) -> bool {
+        self.finish_workspace_motion();
+
         if state == ButtonState::Pressed {
             self.swallowed_buttons.remove(&button);
             self.pressed_buttons.insert(button);

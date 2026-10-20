@@ -98,6 +98,9 @@ fn apply(state: &mut Villain, request: &serde_json::Value) -> Result<serde_json:
     }
     Ok(serde_json::json!({
         "active_workspace": state.active_workspace + 1,
+        "motion": state.workspace_motion.scenes(std::time::Instant::now()).into_iter()
+            .map(|(workspace, x)| serde_json::json!({"workspace": workspace + 1, "x": x})).collect::<Vec<_>>(),
+        "motion_timer": state.workspace_motion.timer.is_some(),
         "offset": state.gestures.transition.map(|transition| transition.offset),
         "source": state.gestures.transition.map(|transition| transition.source + 1),
         "target": state.gestures.transition.map(|transition| transition.target + 1),

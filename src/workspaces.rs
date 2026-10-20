@@ -963,6 +963,30 @@ impl Villain {
         self.add_workspace_window(index, Window::new_x11_window(surface));
     }
     pub fn switch_workspace(&mut self, index: usize) {
+        let direction = if index > self.active_workspace {
+            crate::workspace_navigation::Direction::Next
+        } else {
+            crate::workspace_navigation::Direction::Previous
+        };
+        self.switch_workspace_direction(index, direction);
+    }
+
+    pub(crate) fn switch_workspace_direction(
+        &mut self,
+        index: usize,
+        direction: crate::workspace_navigation::Direction,
+    ) {
+        if index >= self.workspaces.len() {
+            return;
+        }
+        let source = self.active_workspace;
+        self.switch_workspace_immediate(index);
+        if source != index {
+            self.start_workspace_motion(source, index, direction);
+        }
+    }
+
+    pub(crate) fn switch_workspace_immediate(&mut self, index: usize) {
         if index >= self.workspaces.len() {
             return;
         }
@@ -1702,6 +1726,9 @@ impl Villain {
     pub(crate) fn input_window_at_pointer(
         &self,
     ) -> Option<(Window, Point<i32, smithay::utils::Logical>)> {
+        if self.timed_workspace_motion() {
+            return None;
+        }
         // Match rendered bounds while a client retains an old or oversized buffer.
         let layout = self.workspace_layout(self.active_workspace);
         for window in self.space.elements().rev() {
@@ -1733,6 +1760,9 @@ impl Villain {
     }
 
     fn border_window_at_pointer(&self) -> Option<(Window, Point<i32, smithay::utils::Logical>)> {
+        if self.timed_workspace_motion() {
+            return None;
+        }
         let layout = self.workspace_layout(self.active_workspace);
         for window in self.space.elements().rev() {
             let location = self.space.element_location(window)?;

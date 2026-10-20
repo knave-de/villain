@@ -83,6 +83,7 @@ pub fn init_winit(
         .insert_source(winit_source, move |event, _, state| match event {
             WinitEvent::Resized { size, .. } => {
                 state.cancel_swipe(0);
+                state.cancel_workspace_motion();
                 state.output_size = size.to_logical(1);
                 state.overview_panes.clear();
                 state.winit.as_ref().unwrap().output.change_current_state(
@@ -138,6 +139,7 @@ pub fn init_winit(
                 state.update_interaction_cursor();
             }
             WinitEvent::Input(InputEvent::PointerAxis { event }) => {
+                state.finish_workspace_motion();
                 if state.screenshot.intercepting_pointer() {
                     return;
                 }
@@ -164,6 +166,7 @@ pub fn init_winit(
                 state.host_focused = focused;
                 if !focused {
                     state.cancel_swipe(0);
+                    state.cancel_workspace_motion();
                     crate::screenshot::cancel(state, false);
                     state.screenshot.clear_intercepted_buttons();
                     state.release_pointer_buttons();
@@ -236,6 +239,8 @@ fn render_frame(state: &mut Villain) {
         Ok(())
     })();
     if let Err(error) = result {
+        state.cancel_swipe(0);
+        state.cancel_workspace_motion();
         tracing::error!(%error, "Winit render failed");
         state.repaint_needed = true;
     }

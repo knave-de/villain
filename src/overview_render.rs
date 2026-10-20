@@ -40,7 +40,18 @@ pub fn elements(
         .map(OverviewRenderElement::Cursor)
         .collect();
     let cursor_len = result.len();
-    if let Some(transition) = state.gestures.transition {
+    let now = std::time::Instant::now();
+    let scenes = if let Some(transition) = state.gestures.transition {
+        let incoming = transition.offset
+            + f64::from(transition.direction.incoming_offset(state.output_size.w));
+        vec![
+            (transition.source, transition.offset),
+            (transition.target, incoming),
+        ]
+    } else {
+        state.workspace_motion.scenes(now)
+    };
+    if !scenes.is_empty() {
         use smithay::{
             backend::renderer::element::AsRenderElements, desktop::layer_map_for_output,
         };
@@ -73,12 +84,11 @@ pub fn elements(
             }
         }
         let width = state.output_size.w;
-        let offset = transition.offset.round() as i32;
-        let incoming = offset + transition.direction.incoming_offset(width);
         let bounds = Rectangle::from_size((width, state.output_size.h).into());
         let mut effects = std::mem::take(&mut state.appearance_renderer);
         let scenes = (|| {
-            for (workspace, x) in [(transition.source, offset), (transition.target, incoming)] {
+            for (workspace, x) in scenes {
+                let x = x.round() as i32;
                 let clip = Rectangle::new((x, 0).into(), (width, state.output_size.h).into());
                 let Some(clip) = clip.intersection(bounds) else {
                     continue;

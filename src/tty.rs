@@ -207,6 +207,7 @@ pub fn init(
         .insert_source(notifier, move |event, _, state| match event {
             SessionEvent::PauseSession => {
                 state.cancel_swipe(0);
+                state.cancel_workspace_motion();
                 input.suspend();
                 state.release_pointer_buttons();
                 let keyboard = state.keyboard.clone();
@@ -394,6 +395,7 @@ fn process_input(event: InputEvent<LibinputInputBackend>, state: &mut Villain) {
             state.update_interaction_cursor();
         }
         InputEvent::PointerAxis { event } => {
+            state.finish_workspace_motion();
             if state.screenshot.intercepting_pointer() {
                 return;
             }

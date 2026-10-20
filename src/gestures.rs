@@ -1,15 +1,12 @@
-//! One owner per swipe stream; workspace mutation stays in Dispatch.
-use crate::{dispatch::Dispatch, state::Villain, workspace_navigation::Direction};
+//! One owner per swipe stream; logical activation uses the shared workspace switch path.
+use crate::{motion::Tween, workspace_motion::SETTLE};
+use crate::{state::Villain, workspace_navigation::Direction};
 use knave_config::gesture::{GestureAction, GestureBinding, GestureConfig, GestureDirection};
 use smithay::{
     input::pointer::{GestureSwipeBeginEvent, GestureSwipeEndEvent, GestureSwipeUpdateEvent},
-    reexports::calloop::{
-        RegistrationToken,
-        timer::{TimeoutAction, Timer},
-    },
     utils::SERIAL_COUNTER,
 };
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 pub(crate) fn bindings(config: &GestureConfig) -> Vec<GestureBinding> {
     let mut result = vec![GestureBinding {
@@ -86,19 +83,22 @@ pub(crate) struct Transition {
     pub target: usize,
     pub direction: Direction,
     pub offset: f64,
-    settle: Option<(Instant, f64, f64)>,
+    settle: Option<Tween>,
 }
 #[derive(Default)]
 pub(crate) struct Gestures {
     stream: Option<Stream>,
     pub transition: Option<Transition>,
-    timer: Option<RegistrationToken>,
     transition_device: Option<String>,
 }
 impl Gestures {
     pub fn visible(&self, index: usize) -> bool {
         self.transition
             .is_some_and(|transition| transition.source == index || transition.target == index)
+    }
+    pub(crate) fn settling(&self) -> bool {
+        self.transition
+            .is_some_and(|transition| transition.settle.is_some())
     }
     fn reserved(&self) -> bool {
         self.stream
@@ -115,14 +115,12 @@ impl Villain {
             || !self.host_focused
             || self.tty.as_ref().is_some_and(|tty| !tty.is_active())
     }
-    fn stop_swipe_visual(&mut self) {
+    pub(crate) fn stop_swipe_visual(&mut self) {
         self.gestures.transition_device = None;
-        if let Some(timer) = self.gestures.timer.take() {
-            self.loop_handle.remove(timer);
-        }
         if self.gestures.transition.take().is_some() {
             self.request_repaint();
         }
+        self.retire_motion_timer();
     }
     /// Keep a tombstone until End so an interrupted reserved stream cannot leak to clients.
     pub(crate) fn cancel_swipe(&mut self, time: u32) {
@@ -147,6 +145,9 @@ impl Villain {
         self.stop_swipe_visual();
     }
     pub(crate) fn maintain_swipe(&mut self) {
+        if self.workspace_motion.active() && self.workspace_motion_blocked() {
+            self.cancel_workspace_motion();
+        }
         let target_disappeared = self.config.workspace.skip_empty
             && self.gestures.reserved()
             && self
@@ -202,6 +203,9 @@ impl Villain {
             );
             Owner::Client
         };
+        if matches!(owner, Owner::Reserved(_)) {
+            self.cancel_workspace_motion();
+        }
         self.gestures.stream = Some(Stream {
             device,
             source: self.active_workspace,
@@ -298,55 +302,40 @@ impl Villain {
                     0.0
                 };
                 if commit {
-                    let dispatch = Dispatch::FocusWorkspace(transition.target + 1);
-                    if let Err(error) = self.dispatch(dispatch) {
-                        tracing::warn!(%error, "swipe workspace commit failed");
-                        return;
-                    }
+                    // The same activation/focus/history path, without starting a second animation.
+                    self.switch_workspace_immediate(transition.target);
                 }
-                transition.settle = Some((Instant::now(), transition.offset, end));
+                transition.settle =
+                    Some(Tween::new(transition.offset, end, Instant::now(), SETTLE));
                 self.gestures.transition_device = Some(stream.device);
                 self.gestures.transition = Some(transition);
                 self.request_repaint();
-                match self.loop_handle.insert_source(
-                    Timer::from_duration(Duration::from_millis(16)),
-                    |_, _, state| {
-                        let Some(transition) = &mut state.gestures.transition else {
-                            state.gestures.timer = None;
-                            return TimeoutAction::Drop;
-                        };
-                        let Some((started, from, end)) = transition.settle else {
-                            state.gestures.timer = None;
-                            return TimeoutAction::Drop;
-                        };
-                        let progress = (started.elapsed().as_secs_f64() / 0.160).min(1.0);
-                        transition.offset = from + (end - from) * (1.0 - (1.0 - progress).powi(3));
-                        state.request_repaint();
-                        if progress >= 1.0 {
-                            state.gestures.transition = None;
-                            state.gestures.transition_device = None;
-                            state.gestures.timer = None;
-                            TimeoutAction::Drop
-                        } else {
-                            TimeoutAction::ToDuration(Duration::from_millis(16))
-                        }
-                    },
-                ) {
-                    Ok(token) => self.gestures.timer = Some(token),
-                    Err(error) => {
-                        tracing::warn!(%error, "could not schedule swipe settle");
-                        self.stop_swipe_visual();
-                    }
-                }
+                self.schedule_motion_tick();
             }
             Owner::Discard => {}
         }
+    }
+    pub(crate) fn advance_swipe_settle(&mut self, now: Instant) -> bool {
+        let Some(transition) = &mut self.gestures.transition else {
+            return false;
+        };
+        let Some(tween) = transition.settle else {
+            return false;
+        };
+        let sample = tween.sample(now);
+        transition.offset = sample.value;
+        if sample.finished {
+            self.gestures.transition = None;
+            self.gestures.transition_device = None;
+        }
+        true
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
     #[test]
     #[ignore = "requires private Unix sockets and an isolated XDG_RUNTIME_DIR"]
     fn gesture_workspace_lifecycle_and_timer_cleanup() {
@@ -367,7 +356,7 @@ mod tests {
         assert_eq!(state.gestures.transition.unwrap().offset, -400.0);
         state.swipe_end("pad", false, 5);
         assert_eq!(state.active_workspace, 1);
-        assert!(state.gestures.timer.is_some());
+        assert!(state.workspace_motion.timer.is_some());
         let deadline = Instant::now() + Duration::from_secs(1);
         while state.gestures.transition.is_some() {
             assert!(Instant::now() < deadline);
@@ -375,14 +364,14 @@ mod tests {
                 .dispatch(Duration::from_millis(20), &mut state)
                 .unwrap();
         }
-        assert!(state.gestures.timer.is_none());
+        assert!(state.workspace_motion.timer.is_none());
         state.swipe_begin("pad".into(), 3, 6);
         state.swipe_update("pad", -100.0, 0.0, 7);
         state.swipe_end("pad", false, 8);
         assert_eq!(state.active_workspace, 2);
         state.swipe_device_removed("pad");
         assert!(state.gestures.transition.is_none());
-        assert!(state.gestures.timer.is_none());
+        assert!(state.workspace_motion.timer.is_none());
         state.switch_workspace(1);
         state.swipe_begin("pad".into(), 3, 6);
         state.swipe_update("pad", -100.0, 0.0, 7);
@@ -390,7 +379,7 @@ mod tests {
         assert_eq!(state.active_workspace, 1);
         state.swipe_device_removed("pad");
         assert!(state.gestures.transition.is_none());
-        assert!(state.gestures.timer.is_none());
+        assert!(state.workspace_motion.timer.is_none());
         state.swipe_begin("pad".into(), 3, 9);
         state.swipe_update("pad", -100.0, 0.0, 10);
         state.host_focused = false;

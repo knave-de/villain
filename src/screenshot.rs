@@ -142,6 +142,8 @@ pub(crate) fn begin(
     } else {
         Destination::Save
     };
+    state.cancel_swipe(0);
+    state.cancel_workspace_motion();
     let frame = capture::screenshot_frame(state)?;
     match mode {
         ScreenshotMode::Region => {
