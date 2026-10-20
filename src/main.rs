@@ -20,6 +20,7 @@ mod input_devices;
 mod ipc;
 mod keybinds;
 mod layer_shell;
+mod motion;
 mod overview_render;
 mod preview;
 mod render;
@@ -31,6 +32,7 @@ mod split_grab;
 mod state;
 mod tty;
 mod window_grab;
+mod workspace_motion;
 mod workspace_navigation;
 mod workspaces;
 mod xwayland;
@@ -100,6 +102,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         state.render_if_needed();
     })?;
 
+    state.cancel_swipe(0);
+    state.cancel_workspace_motion();
     shutdown::reset();
     Ok(())
 }

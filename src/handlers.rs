@@ -91,7 +91,7 @@ impl CompositorHandler for Villain {
             || self
                 .window_for_surface(&root)
                 .and_then(|window| self.workspace_for_window(&window))
-                .is_some_and(|index| self.gestures.visible(index))
+                .is_some_and(|index| self.workspace_scene_visible(index))
             || self.layer_surface_visible(&root)
             || self.cursor.uses_surface(&root)
         {

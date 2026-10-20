@@ -134,6 +134,7 @@ impl Villain {
                     .reload()
                     .map_err(|error| DispatchError::Config(error.to_string()))?;
                 self.cancel_swipe(0);
+                self.cancel_workspace_motion();
                 self.release_pointer_buttons();
                 self.appearance_renderer.clear();
                 self.config = config;
@@ -191,7 +192,7 @@ impl Villain {
                 if let Some(target) =
                     self.workspace_target(self.active_workspace, Direction::Previous)
                 {
-                    self.switch_workspace(target);
+                    self.switch_workspace_direction(target, Direction::Previous);
                 }
                 Ok(())
             }
@@ -204,7 +205,7 @@ impl Villain {
             Dispatch::NextWorkspace => {
                 if let Some(target) = self.workspace_target(self.active_workspace, Direction::Next)
                 {
-                    self.switch_workspace(target);
+                    self.switch_workspace_direction(target, Direction::Next);
                 }
                 Ok(())
             }
@@ -252,6 +253,8 @@ impl Villain {
 
     fn set_overview_visible(&mut self, visible: bool) {
         if self.overview_visible != visible {
+            self.cancel_swipe(0);
+            self.cancel_workspace_motion();
             self.release_pointer_buttons();
             if !visible {
                 for entry in &mut self.shell_surfaces {

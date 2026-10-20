@@ -301,6 +301,15 @@ bounded to eight and canvases to eight million pixels. Shell layers and overview
 panes are excluded from workspace capture. See Knave ADR 0007 for deployment and
 compatibility; multiple-monitor selection remains out of scope.
 
+## Workspace animations
+
+Keyboard, bar and control-command workspace switches slide windows and wallpaper
+for 160 ms; focus and workspace state change immediately. Next/previous keep their
+direction through wrapping and skipped empty slots. Repeated switches retarget
+from current positions. Panels and the cursor remain stationary. Pointer clicks
+and scrolling finish the transition before delivery. See the
+[motion design](docs/architecture/workspace-motion.md) for ownership and interruptions.
+
 ## Workspace swipes
 
 Three-finger horizontal touchpad swipes move workspace scenes with your fingers.
