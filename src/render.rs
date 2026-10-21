@@ -221,6 +221,9 @@ fn render_frame(state: &mut Villain) {
             .cursor
             .render_elements(renderer, state.pointer_location, now);
         let elements = crate::overview_render::elements(state, renderer, cursor_elements)?;
+        let elements = state
+            .night_light
+            .apply(renderer, state.output_size, elements)?;
         let result = winit.damage.render_output(
             renderer,
             &mut framebuffer,

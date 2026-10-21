@@ -284,6 +284,9 @@ impl Tty {
                 .render_elements(&mut self.renderer, state.pointer_location, now);
         let elements =
             crate::overview_render::elements(state, &mut self.renderer, cursor_elements)?;
+        let elements = state
+            .night_light
+            .apply(&mut self.renderer, state.output_size, elements)?;
         let result = self.damage.render_output(
             &mut self.renderer,
             &mut framebuffer,

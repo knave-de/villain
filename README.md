@@ -329,3 +329,9 @@ To skip empty slots when cycling with next/previous shortcuts or swipes, set
 `skip_empty = true` under `[compositor.workspace]` and reload. It defaults to
 false; direct number/bar selection still reaches empty slots. Minimized windows
 count as occupancy. Closing the last window leaves you on the current workspace.
+
+Night Light uses Knave Session's validated desktop command to apply a color
+transform to the complete physical/nested output. It includes shell layers and
+the cursor; capture source textures keep their original colors. This feature
+requires matching Knave and Shell builds (Knave ADR 0013), with no external
+hyprsunset/gamma-control dependency.

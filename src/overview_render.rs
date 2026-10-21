@@ -18,6 +18,7 @@ use crate::{cursor::CursorRenderElement, state::Villain};
 
 smithay::backend::renderer::element::render_elements! {
     pub OverviewRenderElement<=GlesRenderer>;
+    Night=smithay::backend::renderer::gles::element::TextureShaderElement,
     Cursor=CursorRenderElement,
     Overlay=smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement<GlesRenderer>,
     Window=crate::capture_window::WindowElement,
