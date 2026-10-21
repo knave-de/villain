@@ -253,6 +253,9 @@ fn layer_lifecycle_focus_and_workspace_independence() {
         inspect(&sender, |s| s.switch_workspace(0));
         settle(&mut queue, &mut client);
         assert_eq!(client.app_size, (800, 560));
+        app.attach(Some(&buffer), 0, 0);
+        app.commit();
+        settle(&mut queue, &mut client);
         top.set_maximized();
         settle(&mut queue, &mut client);
         assert_eq!(client.app_size, (800, 560));

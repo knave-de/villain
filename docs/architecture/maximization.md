@@ -24,6 +24,12 @@ application fullscreen is not cleared by new-window activation. Application
 requests on background workspaces do not switch workspaces. Move/resize requests
 are ignored while maximized so they cannot overwrite the saved rectangle.
 
+Windows open unmaximized. Native maximize requests before a content buffer is
+committed receive an unmaximized configure; an initial configure acknowledgement
+alone does not lift this restriction. Initial X11 EWMH maximization is cleared by
+the normal map-time layout. Later client requests and user commands can maximize.
+No timer or additional runtime state is needed.
+
 Both native xdg-shell and XWayland EWMH requests share this implementation.
 Maximized state is advertised to clients independently of fullscreen. Repeated
 native requests still receive configure responses. Panel/output changes
