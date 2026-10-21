@@ -651,12 +651,12 @@ impl Villain {
         // Some toolkits commit a placeholder buffer before requesting their
         // startup state. Finish opening at the first content frame callback.
         if !Self::window_opening_complete(window)
-            && let Some(surface) = window.toplevel().map(|top| top.wl_surface())
-            && smithay::backend::renderer::utils::with_renderer_surface_state(surface, |state| {
+            && let Some(surface) = window.wl_surface()
+            && smithay::backend::renderer::utils::with_renderer_surface_state(&surface, |state| {
                 state.buffer().is_some()
             })
             .unwrap_or(false)
-            && smithay::wayland::compositor::with_states(surface, |states| {
+            && smithay::wayland::compositor::with_states(&surface, |states| {
                 !states
                     .cached_state
                     .get::<smithay::wayland::compositor::SurfaceAttributes>()

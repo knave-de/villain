@@ -24,11 +24,12 @@ application fullscreen is not cleared by new-window activation. Application
 requests on background workspaces do not switch workspaces. Move/resize requests
 are ignored while maximized so they cannot overwrite the saved rectangle.
 
-Windows open unmaximized. Native maximize requests before the first content
+Windows open unmaximized. Client maximize requests before the first content
 frame callback receive an unmaximized configure; configure acknowledgements and
 placeholder buffers alone do not finish opening. The existing callback delivery
 path records completion once per window, including captured windows. Initial
-X11 EWMH maximization is cleared by the normal map-time layout. Later client
+X11 EWMH maximization is cleared by the normal map-time layout; requests just
+after mapping also wait for the first content frame callback. Later client
 requests and user commands can maximize. No additional timer or worker is needed.
 
 Both native xdg-shell and XWayland EWMH requests share this implementation.

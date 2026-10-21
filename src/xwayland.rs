@@ -285,7 +285,7 @@ impl XwmHandler for Villain {
 
     fn maximize_request(&mut self, _xwm: XwmId, surface: X11Surface) {
         if let Some(window) = self.window_for_x11_surface(&surface) {
-            self.set_window_maximized(&window, true);
+            self.set_window_maximized(&window, Self::window_opening_complete(&window));
         }
     }
 
@@ -409,6 +409,11 @@ mod tests {
                 .dispatch(Duration::from_millis(5), state)
                 .unwrap();
             state.space.refresh();
+            if let Some(output) = state.space.outputs().next() {
+                for window in state.space.elements() {
+                    Villain::send_window_frame(window, output, state.start_time.elapsed());
+                }
+            }
             state.display_handle.flush_clients().unwrap();
         }
     }
