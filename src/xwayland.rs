@@ -793,6 +793,7 @@ mod tests {
             .unwrap()
             .atom;
         let maximize = |id, enabled| {
+            std::thread::sleep(Duration::from_secs(1));
             conn.send_event(
                 false,
                 root,

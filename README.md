@@ -159,7 +159,8 @@ dispatch = "last-workspace"
 ## Maximize and restore
 
 Applications open unmaximized, even when they request a restored maximized state.
-After their first content frame callback, they can request maximization normally.
+Startup requests are ignored until one second after their first content frame
+callback. User maximize shortcuts and commands work immediately.
 
 `MOD+F` toggles maximization in the default binding set. Maximized windows fill
 usable workspace space, keeping layer-shell panels and application chrome.

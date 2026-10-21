@@ -324,6 +324,7 @@ fn wayland_floating_and_fullscreen_requests() {
         settle(&mut queue, &mut client);
         inspect(&sender, |state| finish_opening_frames(state));
         settle(&mut queue, &mut client);
+        std::thread::sleep(Duration::from_secs(1));
         inspect(&sender, |s| {
             s.pointer_location = (100.0, 100.0).into();
             s.refresh_pointer(0);
@@ -722,6 +723,7 @@ fn wayland_floating_and_fullscreen_requests() {
         settle(&mut queue, &mut client);
         inspect(&sender, |state| finish_opening_frames(state));
         settle(&mut queue, &mut client);
+        std::thread::sleep(Duration::from_secs(1));
         dt.set_maximized();
         settle(&mut queue, &mut client);
         assert!(client.configures[&3].maximized);

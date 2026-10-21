@@ -25,11 +25,14 @@ requests on background workspaces do not switch workspaces. Move/resize requests
 are ignored while maximized so they cannot overwrite the saved rectangle.
 
 Windows open unmaximized. Client maximize requests before the first content
-frame callback receive an unmaximized configure; configure acknowledgements and
+frame callback and a one-second settling period receive an unmaximized
+configure; configure acknowledgements and
 placeholder buffers alone do not finish opening. The existing callback delivery
-path records completion once per window, including captured windows. Initial
+path records the first frame time once per window, including captured windows.
+The settling period covers toolkits that restore state after drawing, especially
+XWayland; it is checked only on client requests and adds no scheduled work. Initial
 X11 EWMH maximization is cleared by the normal map-time layout; requests just
-after mapping also wait for the first content frame callback. Later client
+after mapping also wait for the same settling period. Later client
 requests and user commands can maximize. No additional timer or worker is needed.
 
 Both native xdg-shell and XWayland EWMH requests share this implementation.

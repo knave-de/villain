@@ -264,6 +264,7 @@ fn layer_lifecycle_focus_and_workspace_independence() {
             }
         });
         settle(&mut queue, &mut client);
+        std::thread::sleep(Duration::from_secs(1));
         top.set_maximized();
         settle(&mut queue, &mut client);
         assert_eq!(client.app_size, (800, 560));
