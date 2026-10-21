@@ -499,9 +499,7 @@ fn finish_pending(state: &mut Villain) {
             && let Some(window) = state.capture_window(id)
         {
             // A shared window continues receiving frame callbacks off workspace.
-            window.send_frame(output, state.start_time.elapsed(), None, |_, _| {
-                Some(output.clone())
-            });
+            Villain::send_window_frame(&window, output, state.start_time.elapsed());
         }
     }
     let _ = state.display_handle.flush_clients();

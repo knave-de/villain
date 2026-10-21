@@ -58,7 +58,7 @@ impl Villain {
                     // Resolve visibility when the timer fires: a workspace may have
                     // changed since the render that scheduled this callback.
                     for window in state.space.elements() {
-                        window.send_frame(&output, now, None, |_, _| Some(output.clone()));
+                        Villain::send_window_frame(window, &output, now);
                     }
                     for index in 0..state.workspaces.len() {
                         if !state.workspace_scene_visible(index)
@@ -73,7 +73,7 @@ impl Villain {
                             && let Some(scene) = state.workspace_preview_scene(index)
                         {
                             for (window, _) in scene.windows {
-                                window.send_frame(&output, now, None, |_, _| Some(output.clone()));
+                                Villain::send_window_frame(&window, &output, now);
                             }
                         }
                     }

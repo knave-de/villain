@@ -154,11 +154,8 @@ impl XwmHandler for Villain {
             return;
         }
         let fullscreen = window.is_fullscreen();
-        let maximized = window.is_maximized();
+        // Initial EWMH maximization is replaced by the normal layout on map.
         self.add_x11_window(window.clone());
-        if maximized && let Some(window) = self.window_for_x11_surface(&window) {
-            self.set_window_maximized(&window, true);
-        }
         if fullscreen && let Some(window) = self.window_for_x11_surface(&window) {
             self.set_window_fullscreen(&window, true);
         }
@@ -288,7 +285,7 @@ impl XwmHandler for Villain {
 
     fn maximize_request(&mut self, _xwm: XwmId, surface: X11Surface) {
         if let Some(window) = self.window_for_x11_surface(&surface) {
-            self.set_window_maximized(&window, true);
+            self.set_window_maximized(&window, Self::window_opening_complete(&window));
         }
     }
 
@@ -412,6 +409,11 @@ mod tests {
                 .dispatch(Duration::from_millis(5), state)
                 .unwrap();
             state.space.refresh();
+            if let Some(output) = state.space.outputs().next() {
+                for window in state.space.elements() {
+                    Villain::send_window_frame(window, output, state.start_time.elapsed());
+                }
+            }
             state.display_handle.flush_clients().unwrap();
         }
     }
@@ -462,7 +464,7 @@ mod tests {
         });
         let (conn, screen) = connection.unwrap().unwrap();
         let root = conn.setup().roots[screen].root;
-        let create = |override_redirect: bool, parent: Option<u32>| {
+        let create = |override_redirect: bool, parent: Option<u32>, maximized: bool| {
             let id = conn.generate_id().unwrap();
             conn.create_window(
                 0,
@@ -491,24 +493,49 @@ mod tests {
                 )
                 .unwrap();
             }
+            if maximized {
+                let atom =
+                    |name: &[u8]| conn.intern_atom(false, name).unwrap().reply().unwrap().atom;
+                conn.change_property32(
+                    PropMode::REPLACE,
+                    id,
+                    atom(b"_NET_WM_STATE"),
+                    AtomEnum::ATOM,
+                    &[
+                        atom(b"_NET_WM_STATE_MAXIMIZED_HORZ"),
+                        atom(b"_NET_WM_STATE_MAXIMIZED_VERT"),
+                    ],
+                )
+                .unwrap();
+            }
             conn.map_window(id).unwrap();
             conn.flush().unwrap();
             id
         };
-        let first = create(false, None);
+        let first = create(false, None, true);
         pump_until(&mut event_loop, &mut state, |state| {
             state
                 .window_for_x11_id(first)
                 .is_some_and(|window| window.x11_surface().unwrap().wl_surface().is_some())
         });
+        let first_window = state.window_for_x11_id(first).unwrap();
+        assert!(!first_window.x11_surface().unwrap().is_maximized());
+        assert!(
+            !state
+                .window_info()
+                .iter()
+                .find(|w| w.id == state.window_id(&first_window).unwrap())
+                .unwrap()
+                .maximized
+        );
         state.switch_workspace(4);
-        let second = create(false, None);
+        let second = create(false, None, false);
         pump_until(&mut event_loop, &mut state, |state| {
             state
                 .window_for_x11_id(second)
                 .is_some_and(|window| window.x11_surface().unwrap().wl_surface().is_some())
         });
-        let popup = create(true, Some(second));
+        let popup = create(true, Some(second), false);
         pump_until(&mut event_loop, &mut state, |state| {
             state
                 .window_for_x11_id(popup)
@@ -640,7 +667,7 @@ mod tests {
             first
         );
         // A background app can create a popup after we switch away.
-        let late_popup = create(true, Some(second));
+        let late_popup = create(true, Some(second), false);
         pump_until(&mut event_loop, &mut state, |state| {
             state.window_for_x11_id(late_popup).is_some()
         });
@@ -676,7 +703,7 @@ mod tests {
             first
         );
         // Exercise real EWMH fullscreen requests and ICCCM floating hints.
-        let other = create(false, None);
+        let other = create(false, None, false);
         pump_until(&mut event_loop, &mut state, |state| {
             state.window_for_x11_id(other).is_some()
         });
@@ -698,7 +725,7 @@ mod tests {
         state
             .dispatch(crate::dispatch::Dispatch::ResetMaster)
             .unwrap();
-        let dialog = create(false, Some(first));
+        let dialog = create(false, Some(first), false);
         pump_until(&mut event_loop, &mut state, |state| {
             state
                 .window_for_x11_id(dialog)
@@ -766,6 +793,7 @@ mod tests {
             .unwrap()
             .atom;
         let maximize = |id, enabled| {
+            std::thread::sleep(Duration::from_secs(1));
             conn.send_event(
                 false,
                 root,
@@ -789,7 +817,7 @@ mod tests {
             800
         );
         let first_window = state.window_for_x11_id(first).unwrap();
-        let new_child = create(false, Some(first));
+        let new_child = create(false, Some(first), false);
         pump_until(&mut event_loop, &mut state, |state| {
             state
                 .window_for_x11_id(new_child)
@@ -811,7 +839,7 @@ mod tests {
         pump_until(&mut event_loop, &mut state, |state| {
             state.window_for_x11_id(new_child).is_none()
         });
-        let new_app = create(false, None);
+        let new_app = create(false, None, false);
         pump_until(&mut event_loop, &mut state, |state| {
             state
                 .window_for_x11_id(new_app)
@@ -932,7 +960,7 @@ mod tests {
             300
         );
 
-        let fixed = create(false, None);
+        let fixed = create(false, None, false);
         let hints = smithay::reexports::x11rb::properties::WmSizeHints {
             min_size: Some((240, 180)),
             max_size: Some((240, 180)),

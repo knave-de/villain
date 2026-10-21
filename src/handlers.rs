@@ -240,7 +240,7 @@ impl XdgShellHandler for Villain {
 
     fn maximize_request(&mut self, surface: ToplevelSurface) {
         if let Some(window) = self.window_for_surface(surface.wl_surface()) {
-            self.set_window_maximized(&window, true);
+            self.set_window_maximized(&window, Self::window_opening_complete(&window));
         }
     }
 

@@ -168,6 +168,7 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for Client {
         }
     }
 }
+delegate_noop!(Client: ignore wayland_client::protocol::wl_callback::WlCallback);
 delegate_noop!(Client: ignore wl_shm::WlShm);
 delegate_noop!(Client: ignore wl_shm_pool::WlShmPool);
 delegate_noop!(Client: ignore wl_buffer::WlBuffer);
@@ -209,6 +210,21 @@ fn mapped(state: &Villain, app: &str) -> bool {
         })
 }
 
+fn finish_opening_frames(state: &Villain) {
+    let output = smithay::output::Output::new(
+        "opening-test".into(),
+        smithay::output::PhysicalProperties {
+            size: (0, 0).into(),
+            subpixel: smithay::output::Subpixel::Unknown,
+            make: "test".into(),
+            model: "test".into(),
+        },
+    );
+    for window in state.space.elements() {
+        Villain::send_window_frame(window, &output, state.start_time.elapsed());
+    }
+}
+
 #[test]
 #[ignore = "requires private Unix sockets and an isolated XDG_RUNTIME_DIR"]
 fn wayland_floating_and_fullscreen_requests() {
@@ -243,6 +259,7 @@ fn wayland_floating_and_fullscreen_requests() {
             queue.roundtrip(client).unwrap();
         };
         let (a, _ax, at) = create(1, "primary");
+        at.set_maximized();
         a.commit();
         let (b, _bx, bt) = create(2, "other");
         b.commit();
@@ -263,6 +280,15 @@ fn wayland_floating_and_fullscreen_requests() {
             (400, 600)
         );
         assert!(client.configures[&1].tiled);
+        assert!(
+            !client.configures[&1].maximized,
+            "startup maximize is rejected"
+        );
+        inspect(&sender, |state| assert!(!find(state, "primary").maximized));
+        // Initial configure acknowledgement alone does not finish opening.
+        at.set_maximized();
+        settle(&mut queue, &mut client);
+        assert!(!client.configures[&1].maximized);
         // Attach real buffers so pointer hit testing follows the normal client path.
         let shm: wl_shm::WlShm = globals.bind(&qh, 1..=1, ()).unwrap();
         let seat: wl_seat::WlSeat = globals.bind(&qh, 1..=7, ()).unwrap();
@@ -287,6 +313,18 @@ fn wayland_floating_and_fullscreen_requests() {
         b.attach(Some(&buffer), 0, 0);
         b.commit();
         settle(&mut queue, &mut client);
+        // Toolkits may send startup maximize after a placeholder buffer.
+        at.set_maximized();
+        settle(&mut queue, &mut client);
+        assert!(!client.configures[&1].maximized);
+        a.frame(&qh, ());
+        a.commit();
+        b.frame(&qh, ());
+        b.commit();
+        settle(&mut queue, &mut client);
+        inspect(&sender, |state| finish_opening_frames(state));
+        settle(&mut queue, &mut client);
+        std::thread::sleep(Duration::from_secs(1));
         inspect(&sender, |s| {
             s.pointer_location = (100.0, 100.0).into();
             s.refresh_pointer(0);
@@ -679,6 +717,13 @@ fn wayland_floating_and_fullscreen_requests() {
         assert!(!client.configures[&1].maximized && client.configures[&1].tiled);
         assert_eq!(client.configures[&1].width, 400);
         // A floating dialog retains its exact pre-maximize geometry.
+        dialog.attach(Some(&buffer), 0, 0);
+        dialog.frame(&qh, ());
+        dialog.commit();
+        settle(&mut queue, &mut client);
+        inspect(&sender, |state| finish_opening_frames(state));
+        settle(&mut queue, &mut client);
+        std::thread::sleep(Duration::from_secs(1));
         dt.set_maximized();
         settle(&mut queue, &mut client);
         assert!(client.configures[&3].maximized);

@@ -253,6 +253,18 @@ fn layer_lifecycle_focus_and_workspace_independence() {
         inspect(&sender, |s| s.switch_workspace(0));
         settle(&mut queue, &mut client);
         assert_eq!(client.app_size, (800, 560));
+        app.attach(Some(&buffer), 0, 0);
+        app.frame(&qh, ());
+        app.commit();
+        settle(&mut queue, &mut client);
+        inspect(&sender, |s| {
+            let output = s.space.outputs().next().unwrap().clone();
+            for window in s.space.elements() {
+                Villain::send_window_frame(window, &output, s.start_time.elapsed());
+            }
+        });
+        settle(&mut queue, &mut client);
+        std::thread::sleep(Duration::from_secs(1));
         top.set_maximized();
         settle(&mut queue, &mut client);
         assert_eq!(client.app_size, (800, 560));
@@ -565,6 +577,7 @@ fn layer_lifecycle_focus_and_workspace_independence() {
                 Some(s.shell_surfaces[0].layer.wl_surface())
             );
         });
+        let frames_before = client.frames;
         surface.frame(&qh, ());
         surface.commit();
         settle(&mut queue, &mut client);
@@ -572,7 +585,7 @@ fn layer_lifecycle_focus_and_workspace_independence() {
             let output = s.space.outputs().next().unwrap().clone();
             s.schedule_frame_callbacks(&output);
         });
-        while client.frames == 0 {
+        while client.frames == frames_before {
             queue.blocking_dispatch(&mut client).unwrap();
         }
         layer.destroy();

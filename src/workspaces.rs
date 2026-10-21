@@ -15,7 +15,13 @@ use smithay::{
     wayland::{seat::WaylandFocus, shell::xdg::ToplevelSurface},
     xwayland::X11Surface,
 };
-use std::{collections::BTreeMap, process::Command};
+use std::{
+    collections::BTreeMap,
+    process::Command,
+    time::{Duration, Instant},
+};
+
+struct WindowOpeningComplete(Instant);
 mod drag_layout;
 use drag_layout::weighted_heights;
 
@@ -635,6 +641,43 @@ impl Villain {
         } else {
             self.configure_workspace(index);
         }
+    }
+
+    pub(crate) fn window_opening_complete(window: &Window) -> bool {
+        window
+            .user_data()
+            .get::<WindowOpeningComplete>()
+            .is_some_and(|opened| opened.0.elapsed() >= Duration::from_secs(1))
+    }
+
+    pub(crate) fn send_window_frame(
+        window: &Window,
+        output: &smithay::output::Output,
+        now: Duration,
+    ) {
+        // Some toolkits commit a placeholder buffer before requesting their
+        // startup state. Start a short settling period at the first content
+        // frame callback; XWayland can draw before application setup finishes.
+        if window.user_data().get::<WindowOpeningComplete>().is_none()
+            && let Some(surface) = window.wl_surface()
+            && smithay::backend::renderer::utils::with_renderer_surface_state(&surface, |state| {
+                state.buffer().is_some()
+            })
+            .unwrap_or(false)
+            && smithay::wayland::compositor::with_states(&surface, |states| {
+                !states
+                    .cached_state
+                    .get::<smithay::wayland::compositor::SurfaceAttributes>()
+                    .current()
+                    .frame_callbacks
+                    .is_empty()
+            })
+        {
+            window
+                .user_data()
+                .insert_if_missing(|| WindowOpeningComplete(Instant::now()));
+        }
+        window.send_frame(output, now, None, |_, _| Some(output.clone()));
     }
 
     /// Maximization overlays the layout; tiled order and floating geometry stay intact.
