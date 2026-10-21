@@ -168,6 +168,7 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for Client {
         }
     }
 }
+delegate_noop!(Client: ignore wayland_client::protocol::wl_callback::WlCallback);
 delegate_noop!(Client: ignore wl_shm::WlShm);
 delegate_noop!(Client: ignore wl_shm_pool::WlShmPool);
 delegate_noop!(Client: ignore wl_buffer::WlBuffer);
@@ -207,6 +208,21 @@ fn mapped(state: &Villain, app: &str) -> bool {
         .is_some_and(|(window, _, _, _, _, visible)| {
             visible && state.space.element_location(&window).is_some()
         })
+}
+
+fn finish_opening_frames(state: &Villain) {
+    let output = smithay::output::Output::new(
+        "opening-test".into(),
+        smithay::output::PhysicalProperties {
+            size: (0, 0).into(),
+            subpixel: smithay::output::Subpixel::Unknown,
+            make: "test".into(),
+            model: "test".into(),
+        },
+    );
+    for window in state.space.elements() {
+        Villain::send_window_frame(window, &output, state.start_time.elapsed());
+    }
 }
 
 #[test]
@@ -296,6 +312,17 @@ fn wayland_floating_and_fullscreen_requests() {
         a.commit();
         b.attach(Some(&buffer), 0, 0);
         b.commit();
+        settle(&mut queue, &mut client);
+        // Toolkits may send startup maximize after a placeholder buffer.
+        at.set_maximized();
+        settle(&mut queue, &mut client);
+        assert!(!client.configures[&1].maximized);
+        a.frame(&qh, ());
+        a.commit();
+        b.frame(&qh, ());
+        b.commit();
+        settle(&mut queue, &mut client);
+        inspect(&sender, |state| finish_opening_frames(state));
         settle(&mut queue, &mut client);
         inspect(&sender, |s| {
             s.pointer_location = (100.0, 100.0).into();
@@ -690,7 +717,10 @@ fn wayland_floating_and_fullscreen_requests() {
         assert_eq!(client.configures[&1].width, 400);
         // A floating dialog retains its exact pre-maximize geometry.
         dialog.attach(Some(&buffer), 0, 0);
+        dialog.frame(&qh, ());
         dialog.commit();
+        settle(&mut queue, &mut client);
+        inspect(&sender, |state| finish_opening_frames(state));
         settle(&mut queue, &mut client);
         dt.set_maximized();
         settle(&mut queue, &mut client);

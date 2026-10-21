@@ -1,7 +1,7 @@
 //! The smallest set of protocol handlers needed to show client windows.
 
 use smithay::{
-    backend::renderer::utils::{on_commit_buffer_handler, with_renderer_surface_state},
+    backend::renderer::utils::on_commit_buffer_handler,
     reexports::wayland_server::{
         Client,
         protocol::{wl_buffer, wl_surface::WlSurface},
@@ -240,12 +240,7 @@ impl XdgShellHandler for Villain {
 
     fn maximize_request(&mut self, surface: ToplevelSurface) {
         if let Some(window) = self.window_for_surface(surface.wl_surface()) {
-            // Startup requests (including restored application state) must not
-            // maximize a window before its first content buffer is committed.
-            let mapped =
-                with_renderer_surface_state(surface.wl_surface(), |state| state.buffer().is_some())
-                    .unwrap_or(false);
-            self.set_window_maximized(&window, mapped);
+            self.set_window_maximized(&window, Self::window_opening_complete(&window));
         }
     }
 
