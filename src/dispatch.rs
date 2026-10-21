@@ -24,6 +24,7 @@ pub enum FocusDirection {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Dispatch {
+    SetNightLight(Option<u16>),
     ToggleFloatingFocused,
     MoveWindow(WindowTarget),
     ResizeWindow(WindowTarget, Option<ResizeEdge>),
@@ -57,6 +58,7 @@ pub enum Dispatch {
 impl From<DesktopCommand> for Dispatch {
     fn from(request: DesktopCommand) -> Self {
         match request {
+            DesktopCommand::SetNightLight { temperature } => Self::SetNightLight(temperature),
             DesktopCommand::ToggleFloatingFocused => Self::ToggleFloatingFocused,
             DesktopCommand::MoveWindow { target } => Self::MoveWindow(target),
             DesktopCommand::ResizeWindow { target, edge } => Self::ResizeWindow(target, edge),
@@ -123,6 +125,13 @@ impl std::error::Error for DispatchError {}
 impl Villain {
     pub fn dispatch(&mut self, dispatch: Dispatch) -> Result<(), DispatchError> {
         match dispatch {
+            Dispatch::SetNightLight(temperature) => {
+                self.night_light
+                    .set(temperature)
+                    .map_err(DispatchError::Interaction)?;
+                self.request_repaint();
+                Ok(())
+            }
             Dispatch::ToggleFloatingFocused => self.toggle_floating_focused(),
             Dispatch::MoveWindow(target) => self.begin_window_interaction(target, false, None),
             Dispatch::ResizeWindow(target, edge) => {

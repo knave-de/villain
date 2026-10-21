@@ -21,6 +21,7 @@ mod ipc;
 mod keybinds;
 mod layer_shell;
 mod motion;
+mod night_light;
 mod overview_render;
 mod preview;
 mod render;

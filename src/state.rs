@@ -46,6 +46,7 @@ use crate::workspaces::Workspace;
 /// mutable reference to it into callbacks, so the first version does not need
 /// `Arc<Mutex<_>>` for its own state.
 pub struct Villain {
+    pub(crate) night_light: crate::night_light::NightLight,
     pub(crate) appearance_renderer: crate::appearance::render::EffectsRenderer,
 
     pub(crate) capture: crate::capture::CaptureState,
@@ -163,6 +164,7 @@ impl Villain {
                     &display_handle,
                 ),
             appearance_renderer: Default::default(),
+            night_light: Default::default(),
 
             capture: crate::capture::CaptureState::default(),
             screenshot: crate::screenshot::ScreenshotState::default(),

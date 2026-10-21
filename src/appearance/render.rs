@@ -704,3 +704,13 @@ impl EffectsRenderer {
 #[cfg(test)]
 #[path = "render_tests.rs"]
 mod tests;
+
+pub(crate) fn render_night_texture<
+    E: smithay::backend::renderer::element::RenderElement<GlesRenderer>,
+>(
+    renderer: &mut GlesRenderer,
+    size: Size<i32, Logical>,
+    elements: &[E],
+) -> Result<GlesTexture, EffectError> {
+    paint::render_texture(renderer, size, elements, [0.0, 0.0, 0.0, 1.0])
+}
