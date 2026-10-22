@@ -134,6 +134,16 @@ focus_cycle_order = "layout" # or "mru"
 focus_follows_mouse = true # false switches focus on click only
 ```
 
+## Move to workspace
+
+`MOD+Shift+1` through `MOD+Shift+9` send the focused window to that
+workspace; `MOD+Shift+0` sends it to workspace 10. You stay on the current
+workspace and focus returns to the most recently focused visible window.
+Selecting the current workspace does nothing. Parent windows and their dialogs
+move together, retaining floating, minimized, maximized and fullscreen state.
+Custom bindings use `dispatch = "move-to-workspace"` with `args = ["2"]`.
+This is a Villain binding action.
+
 ## Last workspace
 
 `MOD+grave` (the grave/tilde key, without Shift) returns to the last workspace

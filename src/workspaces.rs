@@ -1005,6 +1005,88 @@ impl Villain {
         let index = self.workspace_for_pid(surface.get_client_pid().ok());
         self.add_workspace_window(index, Window::new_x11_window(surface));
     }
+    /// Move the transient family together so parent hints cannot pull dialogs back.
+    pub(crate) fn move_focused_to_workspace(&mut self, target: usize) -> bool {
+        let Some(focused) = self.focused_window() else {
+            return false;
+        };
+        let source = self.active_workspace;
+        if source == target {
+            return true;
+        }
+        self.cancel_swipe(0);
+        self.cancel_workspace_motion();
+        self.release_pointer_buttons();
+        let workspace = &self.workspaces[source];
+        let mut root = self.window_id(&focused).unwrap();
+        for _ in 0..workspace.windows.len() {
+            let Some(parent) = workspace
+                .windows
+                .iter()
+                .find(|entry| entry.id == root)
+                .and_then(|entry| entry.parent)
+                .filter(|parent| workspace.windows.iter().any(|entry| entry.id == *parent))
+            else {
+                break;
+            };
+            root = parent;
+        }
+        let ids: Vec<_> = workspace
+            .windows
+            .iter()
+            .filter(|entry| entry.id == root || workspace.descendant_of(entry, root))
+            .map(|entry| entry.id)
+            .collect();
+        let workspace = &mut self.workspaces[source];
+        let moved: Vec<_> = workspace
+            .windows
+            .extract_if(.., |entry| ids.contains(&entry.id))
+            .collect();
+        let history: Vec<_> = workspace
+            .focus_history
+            .extract_if(.., |id| ids.contains(id))
+            .collect();
+        let minimized: Vec<_> = workspace
+            .minimized_history
+            .extract_if(.., |window| {
+                moved.iter().any(|entry| entry.window == *window)
+            })
+            .collect();
+        let fullscreen = workspace.fullscreen.filter(|id| ids.contains(id));
+        let maximized = workspace.maximized.filter(|id| ids.contains(id));
+        if fullscreen.is_some() {
+            workspace.fullscreen = None;
+        }
+        if maximized.is_some() {
+            workspace.maximized = None;
+        }
+        for entry in &moved {
+            Self::set_activated(&entry.window, false);
+        }
+        for entry in &mut self.unmanaged_x11_windows {
+            if entry
+                .parent
+                .as_ref()
+                .is_some_and(|parent| moved.iter().any(|entry| entry.window == *parent))
+            {
+                entry.workspace = target;
+            }
+        }
+        let destination = &mut self.workspaces[target];
+        destination.windows.extend(moved);
+        destination.focus_history.extend(history);
+        destination.minimized_history.extend(minimized);
+        if fullscreen.is_some() {
+            destination.fullscreen = fullscreen;
+        }
+        if maximized.is_some() {
+            destination.maximized = maximized;
+        }
+        self.configure_workspace(target);
+        self.relayout_active_workspace();
+        true
+    }
+
     pub fn switch_workspace(&mut self, index: usize) {
         let direction = if index > self.active_workspace {
             crate::workspace_navigation::Direction::Next
