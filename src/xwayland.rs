@@ -985,7 +985,9 @@ mod tests {
         ] {
             state.focus_managed_window(raised);
             let tree = conn.query_tree(root).unwrap().reply().unwrap().children;
-            let frame = |window: &Window| window.x11_surface().unwrap().mapped_window_id().unwrap();
+            let frame = |window: &smithay::desktop::Window| {
+                window.x11_surface().unwrap().mapped_window_id().unwrap()
+            };
             assert!(
                 tree.iter().position(|id| *id == frame(raised))
                     > tree.iter().position(|id| *id == frame(below))

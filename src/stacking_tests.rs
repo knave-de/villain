@@ -149,7 +149,7 @@ fn floating_focus_raises_and_preserves_family_stacking() {
             for _ in 0..4 {
                 s.cycle_focus(crate::dispatch::FocusCycleStep::Next);
             }
-            assert_eq!(s.focused_window(), Some(tile));
+            assert_eq!(s.focused_window(), Some(tile.clone()));
             assert_eq!(
                 s.workspaces[0].focus_history, history,
                 "raising must not rewrite MRU cycle order"
