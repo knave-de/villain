@@ -1711,7 +1711,8 @@ impl Villain {
         else {
             return;
         };
-        let mut root = entry.id;
+        let target = entry.id;
+        let mut root = target;
         for _ in 0..workspace.windows.len() {
             let Some(parent) = workspace
                 .windows
@@ -1738,7 +1739,10 @@ impl Villain {
                 .iter()
                 .find(|entry| entry.window == *window)
                 .unwrap();
-            entry.id == root || workspace.descendant_of(entry, root)
+            (
+                entry.id == root || workspace.descendant_of(entry, root),
+                entry.id == target || workspace.descendant_of(entry, target),
+            )
         });
         let changed = order.iter().enumerate().any(|(rank, window)| {
             workspace

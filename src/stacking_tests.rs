@@ -165,6 +165,38 @@ fn floating_focus_raises_and_preserves_family_stacking() {
             s.focus_managed_window(&green);
             assert_top(s, &mut renderer, &green, [0, 255, 0, 255]);
         });
+        // A dialog must also rise above its siblings, while staying above the parent.
+        surfaces[1].2.set_parent(Some(&surfaces[0].2));
+        surfaces[1].0.commit();
+        queue.roundtrip(&mut client).unwrap();
+        queue.roundtrip(&mut client).unwrap();
+        inspect(&sender, |s| {
+            let green = s.capture_window(find(s, "stack-1").id).unwrap();
+            let blue = s.capture_window(find(s, "stack-2").id).unwrap();
+            let display = unsafe {
+                smithay::backend::egl::EGLDisplay::new(
+                    smithay::backend::egl::native::EGLSurfacelessDisplay,
+                )
+                .unwrap()
+            };
+            let context = smithay::backend::egl::EGLContext::new(&display).unwrap();
+            let mut renderer =
+                unsafe { smithay::backend::renderer::gles::GlesRenderer::new(context).unwrap() };
+            for (window, color) in [
+                (&blue, [0, 0, 255, 255]),
+                (&green, [0, 255, 0, 255]),
+                (&blue, [0, 0, 255, 255]),
+            ] {
+                s.focus_managed_window(window);
+                s.relayout_active_workspace();
+                let pixels = super::tile_tests::scene_pixels(s, &mut renderer);
+                assert_eq!(
+                    &pixels[(200 * 800 + 300) * 4..(200 * 800 + 301) * 4],
+                    color,
+                    "focused sibling dialog is on top"
+                );
+            }
+        });
     });
     let deadline = Instant::now() + Duration::from_secs(20);
     while !thread.is_finished() {
