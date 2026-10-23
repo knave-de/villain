@@ -11,6 +11,10 @@ master_percent = 50
 focus_cycle_order = "layout"
 environment_file = "environment"
 
+# MOD+SHIFT+1..9 sends the focused window (and its dialogs) to that workspace.
+# MOD+SHIFT+0 sends it to workspace 10; focus stays on the source workspace.
+# Override with dispatch = "move-to-workspace" and args = ["2"].
+
 # Workspace switches slide windows and wallpaper for 160 ms with cubic ease-out.
 # Focus changes immediately; panels stay stationary. A click or scroll finishes
 # the transition before input is delivered. Duration, easing and style are fixed;

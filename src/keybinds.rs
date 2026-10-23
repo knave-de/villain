@@ -113,14 +113,19 @@ impl KeybindRegistry {
             spec("MOD+GRAVE", "last-workspace", &[]),
             spec("MOD+RIGHT", "next-workspace", &[]),
         ];
-        for workspace in 1..=9 {
+        for workspace in 1..=10 {
+            let key = workspace % 10;
             specs.push(BindSpec {
-                keys: format!("MOD+{workspace}"),
+                keys: format!("MOD+{key}"),
                 dispatch: "workspace".into(),
                 args: vec![workspace.to_string()],
             });
+            specs.push(BindSpec {
+                keys: format!("MOD+SHIFT+{key}"),
+                dispatch: "move-to-workspace".into(),
+                args: vec![workspace.to_string()],
+            });
         }
-        specs.push(spec("MOD+0", "workspace", &["10"]));
         specs
     }
 
@@ -378,14 +383,18 @@ fn parse_dispatch(spec: &BindSpec) -> Result<Dispatch, String> {
         // transient Overview processes now that Knave Session owns the service.
         "exec" if spec.args == ["knave-shell", "overview"] => Ok(Dispatch::ToggleOverview),
         "exec" if !spec.args.is_empty() => Ok(Dispatch::Spawn(spec.args.clone())),
-        "workspace" if spec.args.len() == 1 => {
+        "workspace" | "move-to-workspace" if spec.args.len() == 1 => {
             let workspace = spec.args[0]
                 .parse()
                 .map_err(|_| "workspace argument must be a number".to_string())?;
             if !(1..=10).contains(&workspace) {
                 return Err("workspace argument must be between 1 and 10".into());
             }
-            Ok(Dispatch::FocusWorkspace(workspace))
+            Ok(if spec.dispatch == "move-to-workspace" {
+                Dispatch::MoveFocusedToWorkspace(workspace)
+            } else {
+                Dispatch::FocusWorkspace(workspace)
+            })
         }
         "toggle-floating" | "maximize" | "unmaximize" | "toggle-maximize" | "close"
         | "minimize" | "restore-minimized" | "previous-workspace" | "last-workspace"
@@ -394,7 +403,9 @@ fn parse_dispatch(spec: &BindSpec) -> Result<Dispatch, String> {
             Err("dispatch does not accept arguments".into())
         }
         "exec" => Err("exec requires a program in args".into()),
-        "workspace" => Err("workspace requires exactly one argument".into()),
+        "workspace" | "move-to-workspace" => {
+            Err(format!("{} requires exactly one argument", spec.dispatch))
+        }
         dispatch => Err(format!("unknown dispatch {dispatch:?}")),
     }
 }
@@ -735,6 +746,43 @@ mod tests {
             ("MOD+L", "focus-right"),
         ] {
             assert!(parse_dispatch(&spec(keys, dispatch, &["extra"])).is_err());
+        }
+    }
+
+    #[test]
+    fn numbered_move_defaults_and_overrides() {
+        for (modkey, alt, logo) in [("Super", false, true), ("Alt", true, false)] {
+            let registry = KeybindRegistry::defaults(modkey).unwrap();
+            for workspace in 1..=10 {
+                let key = Keysym::new(keysyms::KEY_0 + (workspace % 10) as u32);
+                assert_eq!(
+                    registry.find(&[key], false, alt, true, logo),
+                    Some(Dispatch::MoveFocusedToWorkspace(workspace))
+                );
+                assert_eq!(
+                    registry.find(&[key], false, alt, false, logo),
+                    Some(Dispatch::FocusWorkspace(workspace))
+                );
+            }
+        }
+        let registry = KeybindRegistry::with_overrides(
+            "Super",
+            &[
+                spec("MOD+SHIFT+2", "workspace", &["3"]),
+                spec("MOD+B", "move-to-workspace", &["10"]),
+            ],
+        )
+        .unwrap();
+        assert_eq!(
+            registry.find(&[Keysym::new(keysyms::KEY_2)], false, false, true, true),
+            Some(Dispatch::FocusWorkspace(3))
+        );
+        assert_eq!(
+            registry.find(&[Keysym::new(keysyms::KEY_b)], false, false, false, true),
+            Some(Dispatch::MoveFocusedToWorkspace(10))
+        );
+        for args in [vec![], vec!["0"], vec!["11"], vec!["x"], vec!["1", "2"]] {
+            assert!(parse_dispatch(&spec("MOD+B", "move-to-workspace", &args)).is_err());
         }
     }
 

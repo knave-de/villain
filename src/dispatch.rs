@@ -38,6 +38,7 @@ pub enum Dispatch {
     ToggleMaximizeFocused,
     RestoreLastMinimized,
     FocusWorkspace(usize),
+    MoveFocusedToWorkspace(usize),
     PreviousWorkspace,
     LastWorkspace,
     NextWorkspace,
@@ -196,6 +197,14 @@ impl Villain {
                 }
                 self.switch_workspace(workspace - 1);
                 Ok(())
+            }
+            Dispatch::MoveFocusedToWorkspace(workspace) => {
+                if !(1..=self.workspaces.len()).contains(&workspace) {
+                    return Err(DispatchError::InvalidWorkspace(workspace));
+                }
+                self.move_focused_to_workspace(workspace - 1)
+                    .then_some(())
+                    .ok_or(DispatchError::NoFocusedWindow)
             }
             Dispatch::PreviousWorkspace => {
                 if let Some(target) =
