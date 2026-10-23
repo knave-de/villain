@@ -8,7 +8,7 @@ use smithay::{
     utils::SERIAL_COUNTER,
 };
 
-fn button(s: &mut Villain, code: u32, state: ButtonState) {
+pub(super) fn button(s: &mut Villain, code: u32, state: ButtonState) {
     if !s.handle_compositor_button(code, state, 1) {
         s.refresh_pointer_and_focus(1);
         s.pointer.clone().button(
@@ -22,7 +22,7 @@ fn button(s: &mut Villain, code: u32, state: ButtonState) {
         );
     }
 }
-fn motion(s: &mut Villain, x: f64, y: f64) {
+pub(super) fn motion(s: &mut Villain, x: f64, y: f64) {
     s.pointer_location = (x, y).into();
     s.refresh_pointer_motion(1);
 }

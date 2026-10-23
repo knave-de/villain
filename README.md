@@ -102,6 +102,11 @@ relevant direct/nested live-test coverage.
 
 ## Window focus
 
+Focusing a floating window raises its floating family, with dialogs above their
+parents. This applies to clicks, keyboard/API focus and hover when
+`focus_follows_mouse` is enabled. Stacking survives relayout and workspace
+switches without changing tiling order or the MRU keyboard-cycle sequence.
+
 Clicks on empty space or noninteractive panels preserve the focused visible
 window. If focus is missing, the most recently focused visible window is
 selected. Workspace switches, minimization, and closure also restore visible
