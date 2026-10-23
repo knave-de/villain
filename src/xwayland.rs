@@ -977,6 +977,29 @@ mod tests {
             conn.get_geometry(fixed).unwrap().reply().unwrap().width,
             240
         );
+        // Focus must agree in Smithay, the X server and the preview scene.
+        let fixed_window = state.window_for_x11_id(fixed).unwrap();
+        for (raised, below) in [
+            (&dialog_window, &fixed_window),
+            (&fixed_window, &dialog_window),
+        ] {
+            state.focus_managed_window(raised);
+            let tree = conn.query_tree(root).unwrap().reply().unwrap().children;
+            let frame = |window: &smithay::desktop::Window| {
+                window.x11_surface().unwrap().mapped_window_id().unwrap()
+            };
+            assert!(
+                tree.iter().position(|id| *id == frame(raised))
+                    > tree.iter().position(|id| *id == frame(below))
+            );
+            assert_eq!(
+                conn.get_input_focus().unwrap().reply().unwrap().focus,
+                raised.x11_surface().unwrap().window_id()
+            );
+            state.relayout_active_workspace();
+            let order: Vec<_> = state.space.elements().cloned().collect();
+            assert!(order.iter().position(|w| w == raised) > order.iter().position(|w| w == below));
+        }
         // A client cannot move another window or start a drag without a button.
         state.start_window_grab(dialog_window.clone(), None, None);
         assert!(!state.pointer.is_grabbed());
@@ -993,7 +1016,6 @@ mod tests {
                 state: smithay::backend::input::ButtonState::Pressed,
             },
         );
-        let fixed_window = state.window_for_x11_id(fixed).unwrap();
         let fixed_before = state.floating_geometry(&fixed_window);
         state.start_window_grab(fixed_window.clone(), Some(serial), None);
         state.start_window_grab(dialog_window.clone(), Some(serial), None);

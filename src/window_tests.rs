@@ -1221,3 +1221,6 @@ mod workspace_navigation_tests;
 
 #[path = "drag_tests.rs"]
 mod drag_tests;
+
+#[path = "stacking_tests.rs"]
+mod stacking_tests;

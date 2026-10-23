@@ -38,6 +38,7 @@ pub struct Workspace {
 
 struct WorkspaceWindow {
     id: WindowId,
+    stacking_order: u64,
     window: Window,
     minimized: bool,
     initial_focus_pending: bool,
@@ -163,6 +164,23 @@ pub(crate) fn constrain_geometry(
 }
 
 impl Workspace {
+    fn stacking_path(&self, window: &Window) -> Vec<(u64, u64)> {
+        let mut entry = self.windows.iter().find(|entry| entry.window == *window);
+        let mut path = Vec::new();
+        // Parent hints are client-controlled; bound traversal even for cycles.
+        for _ in 0..self.windows.len() {
+            let Some(current) = entry.filter(|entry| entry.floating.is_some()) else {
+                break;
+            };
+            path.push((current.stacking_order, current.id.0));
+            entry = current
+                .parent
+                .and_then(|id| self.windows.iter().find(|e| e.id == id));
+        }
+        path.reverse();
+        path
+    }
+
     pub(crate) fn is_empty(&self) -> bool {
         self.windows.is_empty()
     }
@@ -570,14 +588,22 @@ impl Villain {
             ));
         }
         // Map tiles first, then the expanded window, then its floating dialogs.
-        result.sort_by_key(|(_, _, fullscreen, maximized, tiled, _)| {
-            if *fullscreen || *maximized {
+        result.sort_by_cached_key(|(window, _, fullscreen, maximized, tiled, _)| {
+            let layer = if *fullscreen || *maximized {
                 1
             } else if *tiled {
                 0
             } else {
                 2
-            }
+            };
+            (
+                layer,
+                if layer == 2 {
+                    workspace.stacking_path(window)
+                } else {
+                    Vec::new()
+                },
+            )
         });
         result
     }
@@ -926,6 +952,7 @@ impl Villain {
         self.next_window_id += 1;
         self.workspaces[index].windows.push(WorkspaceWindow {
             id,
+            stacking_order: id.0,
             window: window.clone(),
             minimized: false,
             initial_focus_pending: true,
@@ -1675,6 +1702,76 @@ impl Villain {
         self.apply_managed_focus(window, true)
     }
 
+    fn raise_floating_window(&mut self, window: &Window) {
+        let workspace = &self.workspaces[self.active_workspace];
+        let Some(entry) = workspace
+            .windows
+            .iter()
+            .find(|entry| entry.window == *window && entry.floating.is_some())
+        else {
+            return;
+        };
+        let target = entry.id;
+        let mut root = target;
+        for _ in 0..workspace.windows.len() {
+            let Some(parent) = workspace
+                .windows
+                .iter()
+                .find(|entry| entry.id == root)
+                .and_then(|entry| entry.parent)
+                .and_then(|id| workspace.windows.iter().find(|entry| entry.id == id))
+                .filter(|entry| entry.floating.is_some())
+            else {
+                break;
+            };
+            root = parent.id;
+        }
+        // Keep floating families together, with descendants above their parents.
+        // This order is independent of tiling and MRU keyboard-cycle order.
+        let mut order: Vec<_> = self
+            .workspace_layout(self.active_workspace)
+            .into_iter()
+            .map(|(window, ..)| window)
+            .collect();
+        order.sort_by_key(|window| {
+            let entry = workspace
+                .windows
+                .iter()
+                .find(|entry| entry.window == *window)
+                .unwrap();
+            (
+                entry.id == root || workspace.descendant_of(entry, root),
+                entry.id == target || workspace.descendant_of(entry, target),
+            )
+        });
+        let changed = order.iter().enumerate().any(|(rank, window)| {
+            workspace
+                .windows
+                .iter()
+                .any(|entry| entry.window == *window && entry.stacking_order != rank as u64)
+        });
+        if !changed {
+            return;
+        }
+        for (rank, window) in order.iter().enumerate() {
+            let entry = self.workspaces[self.active_workspace]
+                .windows
+                .iter_mut()
+                .find(|entry| entry.window == *window)
+                .unwrap();
+            entry.stacking_order = rank as u64;
+        }
+        // Reuse layout order for rendering, hit testing, previews and XWayland.
+        for (window, _, _, _, tiled, visible) in self.workspace_layout(self.active_workspace) {
+            if !tiled && visible {
+                self.space.raise_element(&window, false);
+            }
+        }
+        self.refresh_unmanaged_x11_windows();
+        self.sync_x11_stacking();
+        self.request_repaint();
+    }
+
     fn apply_managed_focus(&mut self, window: &Window, remember: bool) -> bool {
         let Some(index) = self.workspace_for_window(window) else {
             return false;
@@ -1695,6 +1792,9 @@ impl Villain {
             Self::set_activated(&entry.window, entry.window == *window);
         }
         let surface = self.exclusive_layer_focus().unwrap_or(surface);
+        if KeyboardFocus::for_window(window).as_ref() == Some(&surface) {
+            self.raise_floating_window(window);
+        }
         if self.keyboard.current_focus().as_ref() != Some(&surface) {
             self.keyboard
                 .clone()
@@ -1978,6 +2078,7 @@ impl Villain {
         });
         if let Some(window) = focused_window.as_ref() {
             self.remember_focused_window(window);
+            self.raise_floating_window(window);
         }
         if self.keyboard.current_focus() != keyboard_surface {
             for entry in &self.workspaces[self.active_workspace].windows {
@@ -2027,6 +2128,8 @@ impl Villain {
         self.refresh_pointer_surface(time);
         if !self.pointer.is_grabbed() {
             self.focus_window_at_pointer();
+            // Raising a floating family can expose a dialog under the cursor.
+            self.refresh_pointer_surface(time);
         }
     }
 
