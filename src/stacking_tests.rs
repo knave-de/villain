@@ -58,11 +58,16 @@ fn floating_focus_raises_and_preserves_family_stacking() {
         queue.roundtrip(&mut client).unwrap();
         queue.roundtrip(&mut client).unwrap();
         for (id, (surface, _, _)) in surfaces.iter().enumerate() {
+            let (width, height) = match id {
+                0 | 1 => (400, 300),
+                2 => (180, 120),
+                _ => (800, 600),
+            };
             let buffer = pool.create_buffer(
                 id as i32 * 800 * 600 * 4,
-                800,
-                600,
-                800 * 4,
+                width,
+                height,
+                width * 4,
                 wl_shm::Format::Argb8888,
                 &qh,
                 (),
