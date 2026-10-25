@@ -33,6 +33,8 @@ struct Client {
     keyboard_modifiers: Vec<u32>,
     keyboard_keys: Vec<u32>,
     keyboard_enters: Vec<(wl_surface::WlSurface, Vec<u8>)>,
+    inhibitor_states: Vec<bool>,
+    closes: usize,
 }
 impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for Client {
     fn event(
@@ -104,6 +106,8 @@ impl Dispatch<xdg_toplevel::XdgToplevel, usize> for Client {
                     tiled: states.contains(&(xdg_toplevel::State::TiledLeft as u32)),
                 },
             );
+        } else if let xdg_toplevel::Event::Close = event {
+            state.closes += 1;
         }
     }
 }
@@ -175,6 +179,28 @@ delegate_noop!(Client: ignore wl_buffer::WlBuffer);
 delegate_noop!(Client: ignore wl_seat::WlSeat);
 delegate_noop!(Client: ignore wl_compositor::WlCompositor);
 delegate_noop!(Client: ignore wl_surface::WlSurface);
+
+use wayland_protocols::wp::keyboard_shortcuts_inhibit::zv1::client::{
+    zwp_keyboard_shortcuts_inhibit_manager_v1 as inhibit_manager,
+    zwp_keyboard_shortcuts_inhibitor_v1 as keyboard_inhibitor,
+};
+delegate_noop!(Client: ignore inhibit_manager::ZwpKeyboardShortcutsInhibitManagerV1);
+impl Dispatch<keyboard_inhibitor::ZwpKeyboardShortcutsInhibitorV1, ()> for Client {
+    fn event(
+        state: &mut Self,
+        _: &keyboard_inhibitor::ZwpKeyboardShortcutsInhibitorV1,
+        event: keyboard_inhibitor::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        match event {
+            keyboard_inhibitor::Event::Active => state.inhibitor_states.push(true),
+            keyboard_inhibitor::Event::Inactive => state.inhibitor_states.push(false),
+            _ => {}
+        }
+    }
+}
 
 type Inspect = Box<dyn FnOnce(&mut Villain) + Send>;
 fn inspect(sender: &mpsc::Sender<Inspect>, f: impl FnOnce(&mut Villain) + Send + 'static) {
@@ -1197,6 +1223,162 @@ fn directional_focus_and_cycle_order_follow_configuration() {
             state.config.input.focus_follows_mouse = true;
         });
         settle(&mut queue, &mut client);
+    });
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while !thread.is_finished() {
+        assert!(Instant::now() < deadline, "Wayland request test timed out");
+        event_loop
+            .dispatch(Duration::from_millis(2), &mut state)
+            .unwrap();
+        while let Ok(inspect) = requests.try_recv() {
+            inspect(&mut state);
+        }
+        state.space.refresh();
+        state.display_handle.flush_clients().unwrap();
+    }
+    thread.join().unwrap();
+}
+
+#[test]
+#[ignore = "requires private Unix sockets and an isolated XDG_RUNTIME_DIR"]
+fn keyboard_shortcuts_inhibitor_forwards_binding_keys() {
+    let mut event_loop = EventLoop::try_new().unwrap();
+    let mut state = Villain::new(
+        &mut event_loop,
+        Display::new().unwrap(),
+        crate::config::RuntimeConfig::load().unwrap(),
+    );
+    let (server, client) = UnixStream::pair().unwrap();
+    state
+        .display_handle
+        .insert_client(server, Arc::new(crate::state::ClientState::default()))
+        .unwrap();
+    let (sender, requests) = mpsc::channel::<Inspect>();
+    let thread = std::thread::spawn(move || {
+        let conn = Connection::from_socket(client).unwrap();
+        let (globals, mut queue) = registry_queue_init::<Client>(&conn).unwrap();
+        let qh = queue.handle();
+        let compositor: wl_compositor::WlCompositor = globals.bind(&qh, 1..=4, ()).unwrap();
+        let wm: xdg_wm_base::XdgWmBase = globals.bind(&qh, 1..=6, ()).unwrap();
+        let shm: wl_shm::WlShm = globals.bind(&qh, 1..=1, ()).unwrap();
+        let seat: wl_seat::WlSeat = globals.bind(&qh, 1..=7, ()).unwrap();
+        let _keyboard = seat.get_keyboard(&qh, ());
+        let inhibit: inhibit_manager::ZwpKeyboardShortcutsInhibitManagerV1 =
+            globals.bind(&qh, 1..=1, ()).unwrap();
+        let mut client = Client::default();
+        let create = |id, name: &str| {
+            let surface = compositor.create_surface(&qh, ());
+            let xdg = wm.get_xdg_surface(&surface, &qh, ());
+            let top = xdg.get_toplevel(&qh, id);
+            top.set_app_id(name.into());
+            (surface, xdg, top)
+        };
+        let settle = |queue: &mut wayland_client::EventQueue<Client>, client: &mut Client| {
+            queue.roundtrip(client).unwrap();
+            queue.roundtrip(client).unwrap();
+        };
+        // Real buffers so keyboard focus follows the mapped-window path.
+        let buffer = {
+            let path =
+                std::env::temp_dir().join(format!("villain-inhibit-tests-{}", std::process::id()));
+            let file = std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create_new(true)
+                .open(&path)
+                .unwrap();
+            std::fs::remove_file(path).unwrap();
+            file.set_len(400 * 600 * 4).unwrap();
+            let pool = shm.create_pool(file.as_fd(), 400 * 600 * 4, &qh, ());
+            pool.create_buffer(0, 400, 600, 400 * 4, wl_shm::Format::Argb8888, &qh, ())
+        };
+        let (primary, _px, _pt) = create(1, "primary");
+        primary.attach(Some(&buffer), 0, 0);
+        primary.commit();
+        let (grab, _gx, _gt) = create(2, "grabby");
+        grab.attach(Some(&buffer), 0, 0);
+        grab.commit();
+        settle(&mut queue, &mut client);
+        inspect(&sender, |state| {
+            state.focus_window(find(state, "primary").id);
+        });
+        settle(&mut queue, &mut client);
+        // Inhibition is tied to keyboard focus: the surface is unfocused, so
+        // the fresh inhibitor must stay inactive until the surface is entered.
+        let inhibitor = inhibit.inhibit_shortcuts(&grab, &seat, &qh, ());
+        settle(&mut queue, &mut client);
+        assert!(
+            client.inhibitor_states.is_empty(),
+            "unfocused inhibitors stay inactive"
+        );
+        inspect(&sender, |state| {
+            state.focus_window(find(state, "grabby").id);
+        });
+        settle(&mut queue, &mut client);
+        assert_eq!(
+            client.inhibitor_states,
+            [true],
+            "focus activates the inhibitor"
+        );
+        use crate::keybinds::{handle_keyboard_key, shortcuts_inhibited};
+        use smithay::{
+            backend::input::KeyState::{Pressed, Released},
+            input::keyboard::Keycode,
+        };
+        inspect(&sender, |state| {
+            assert!(shortcuts_inhibited(state));
+            // Super+Q would normally close the focused window.
+            handle_keyboard_key(state, Keycode::new(133), Pressed, 1); // Super + 8
+            handle_keyboard_key(state, Keycode::new(24), Pressed, 2); // Q + 8
+            handle_keyboard_key(state, Keycode::new(24), Released, 3);
+            handle_keyboard_key(state, Keycode::new(133), Released, 4);
+            assert!(
+                state.window_info().iter().any(|w| w.app_id == "grabby"),
+                "the chord must not close an inhibited client"
+            );
+            assert!(!state.overview_visible, "Super did not toggle the overview");
+            assert!(state.suppressed_keys.is_empty());
+        });
+        settle(&mut queue, &mut client);
+        assert!(
+            client.keyboard_keys.contains(&16) && client.keyboard_keys.contains(&125),
+            "inhibited chord keys reach the client as raw evdev codes"
+        );
+        assert_eq!(client.closes, 0);
+        inspect(&sender, |state| {
+            state.focus_window(find(state, "primary").id);
+        });
+        settle(&mut queue, &mut client);
+        assert_eq!(
+            client.inhibitor_states.last(),
+            Some(&false),
+            "losing focus deactivates the inhibitor"
+        );
+        inspect(&sender, |state| {
+            state.focus_window(find(state, "grabby").id);
+        });
+        settle(&mut queue, &mut client);
+        assert_eq!(
+            client.inhibitor_states.last(),
+            Some(&true),
+            "refocusing reactivates the inhibitor"
+        );
+        inhibitor.destroy();
+        settle(&mut queue, &mut client);
+        client.keyboard_keys.clear();
+        inspect(&sender, |state| {
+            assert!(!shortcuts_inhibited(state));
+            handle_keyboard_key(state, Keycode::new(133), Pressed, 5);
+            handle_keyboard_key(state, Keycode::new(24), Pressed, 6);
+            handle_keyboard_key(state, Keycode::new(24), Released, 7);
+            handle_keyboard_key(state, Keycode::new(133), Released, 8);
+        });
+        settle(&mut queue, &mut client);
+        assert!(
+            !client.keyboard_keys.contains(&16),
+            "without the inhibitor the chord is intercepted again"
+        );
+        assert_eq!(client.closes, 1, "the compositor requests a close again");
     });
     let deadline = Instant::now() + Duration::from_secs(20);
     while !thread.is_finished() {
