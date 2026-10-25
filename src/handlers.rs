@@ -227,28 +227,17 @@ impl smithay::wayland::keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitHandl
     ) {
         // Recorders, terminal emulators and remote clients request the
         // inhibitor while they are focused: it takes effect immediately,
-        // without a per-client prompt. Focus loss deactivates it again.
+        // without a per-client prompt. Activation is durable: focus loss and
+        // destruction only make inhibition irrelevant without notifying the
+        // client, and key interception is gated on the focused surface
+        // (keybinds::shortcuts_inhibited).
         use smithay::wayland::seat::WaylandFocus;
         let focused = self
             .keyboard
             .current_focus()
             .and_then(|focus| focus.wl_surface().map(|surface| surface.into_owned()));
-        if focused.as_ref() == Some(inhibitor.wl_surface()) {
-            if !inhibitor.is_active() {
-                inhibitor.activate();
-            }
-            self.active_shortcuts_inhibitor = Some(inhibitor);
-        }
-    }
-
-    fn inhibitor_destroyed(
-        &mut self,
-        inhibitor: smithay::wayland::keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitor,
-    ) {
-        // Smithay already cleared the active flag; stop holding the resource
-        // so a later focus change cannot resurrect a dead inhibitor.
-        if self.active_shortcuts_inhibitor.as_ref() == Some(&inhibitor) {
-            self.active_shortcuts_inhibitor = None;
+        if focused.as_ref() == Some(inhibitor.wl_surface()) && !inhibitor.is_active() {
+            inhibitor.activate();
         }
     }
 }

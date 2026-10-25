@@ -1345,40 +1345,87 @@ fn keyboard_shortcuts_inhibitor_forwards_binding_keys() {
             "inhibited chord keys reach the client as raw evdev codes"
         );
         assert_eq!(client.closes, 0);
+        client.keyboard_keys.clear();
         inspect(&sender, |state| {
-            state.focus_window(find(state, "primary").id);
+            let _ = state.focus_window(find(state, "primary").id);
+        });
+        settle(&mut queue, &mut client);
+        // The protocol makes no client notification for focus loss: the
+        // inhibitor stays active and merely becomes irrelevant while its
+        // surface is unfocused, so the compositor gates forwarding on the
+        // focused surface instead.
+        assert_eq!(
+            client.inhibitor_states,
+            [true],
+            "losing focus must not emit inactive"
+        );
+        inspect(&sender, |state| {
+            assert!(!shortcuts_inhibited(state), "focus gates forwarding");
+            // The inhibitor is active, but the focused surface is not
+            // inhibited: compositor bindings apply normally, so Super+Q
+            // closes "primary" while the client stays mapped.
+            handle_keyboard_key(state, Keycode::new(133), Pressed, 5);
+            handle_keyboard_key(state, Keycode::new(24), Pressed, 6);
+            handle_keyboard_key(state, Keycode::new(24), Released, 7);
+            handle_keyboard_key(state, Keycode::new(133), Released, 8);
+            assert!(
+                state.window_info().iter().any(|w| w.app_id == "primary"),
+                "the close request stays until the client exits"
+            );
+        });
+        settle(&mut queue, &mut client);
+        assert!(
+            !client.keyboard_keys.contains(&16),
+            "unfocused chord is intercepted"
+        );
+        assert_eq!(client.closes, 1, "the compositor requests a close");
+        inspect(&sender, |state| {
+            // A bare Super tap alone must still toggle the overview on the
+            // uninhibited surface.
+            handle_keyboard_key(state, Keycode::new(133), Pressed, 9);
+            handle_keyboard_key(state, Keycode::new(133), Released, 10);
+            assert!(state.overview_visible, "Super toggled the overview");
+            use crate::dispatch::Dispatch;
+            let _ = state.dispatch(Dispatch::ToggleOverview);
+            let _ = state.focus_window(find(state, "grabby").id);
         });
         settle(&mut queue, &mut client);
         assert_eq!(
-            client.inhibitor_states.last(),
-            Some(&false),
-            "losing focus deactivates the inhibitor"
+            client.inhibitor_states,
+            [true],
+            "refocusing neither emits inactive nor duplicates active"
         );
+        client.keyboard_keys.clear();
         inspect(&sender, |state| {
-            state.focus_window(find(state, "grabby").id);
+            assert!(shortcuts_inhibited(state));
+            handle_keyboard_key(state, Keycode::new(133), Pressed, 11);
+            handle_keyboard_key(state, Keycode::new(24), Pressed, 12);
+            handle_keyboard_key(state, Keycode::new(24), Released, 13);
+            handle_keyboard_key(state, Keycode::new(133), Released, 14);
+            assert!(!state.overview_visible, "Super did not toggle the overview");
         });
         settle(&mut queue, &mut client);
-        assert_eq!(
-            client.inhibitor_states.last(),
-            Some(&true),
-            "refocusing reactivates the inhibitor"
+        assert!(
+            client.keyboard_keys.contains(&16),
+            "activation survives focus changes: keys reach the client"
         );
+        assert_eq!(client.closes, 1);
         inhibitor.destroy();
         settle(&mut queue, &mut client);
         client.keyboard_keys.clear();
         inspect(&sender, |state| {
             assert!(!shortcuts_inhibited(state));
-            handle_keyboard_key(state, Keycode::new(133), Pressed, 5);
-            handle_keyboard_key(state, Keycode::new(24), Pressed, 6);
-            handle_keyboard_key(state, Keycode::new(24), Released, 7);
-            handle_keyboard_key(state, Keycode::new(133), Released, 8);
+            handle_keyboard_key(state, Keycode::new(133), Pressed, 15);
+            handle_keyboard_key(state, Keycode::new(24), Pressed, 16);
+            handle_keyboard_key(state, Keycode::new(24), Released, 17);
+            handle_keyboard_key(state, Keycode::new(133), Released, 18);
         });
         settle(&mut queue, &mut client);
         assert!(
             !client.keyboard_keys.contains(&16),
             "without the inhibitor the chord is intercepted again"
         );
-        assert_eq!(client.closes, 1, "the compositor requests a close again");
+        assert_eq!(client.closes, 2, "the compositor requests a close again");
     });
     let deadline = Instant::now() + Duration::from_secs(20);
     while !thread.is_finished() {
