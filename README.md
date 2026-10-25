@@ -139,6 +139,17 @@ focus_cycle_order = "layout" # or "mru"
 focus_follows_mouse = true # false switches focus on click only
 ```
 
+## Keyboard shortcut inhibition
+
+Clients can create the standard `zwp_keyboard_shortcuts_inhibit_manager_v1`
+inhibitor for a surface. While that surface has keyboard focus, Villain
+activates the inhibitor and forwards every key to the client instead of
+matching compositor bindings, so recorders, terminal emulators and remote
+desktop clients cannot lose chords. Losing focus or destroying the inhibitor
+restores normal binding handling. Session escape chords are not inhibitable:
+Ctrl+Alt+Backspace and the Ctrl+Alt+F1..F12 VT-switching chords keep working
+under inhibitors so a client can never lock the user out of the session.
+
 ## Move to workspace
 
 `MOD+Shift+1` through `MOD+Shift+9` send the focused window to that

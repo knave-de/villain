@@ -214,6 +214,35 @@ impl ServerDndGrabHandler for Villain {
     fn send(&mut self, _mime_type: String, _fd: OwnedFd, _seat: Seat<Self>) {}
 }
 
+impl smithay::wayland::keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitHandler for Villain {
+    fn keyboard_shortcuts_inhibit_state(
+        &mut self,
+    ) -> &mut smithay::wayland::keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitState {
+        &mut self.keyboard_shortcuts_inhibit_state
+    }
+
+    fn new_inhibitor(
+        &mut self,
+        inhibitor: smithay::wayland::keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitor,
+    ) {
+        // Recorders, terminal emulators and remote clients request the
+        // inhibitor while they are focused: it takes effect immediately,
+        // without a per-client prompt. Activation is durable: focus loss and
+        // destruction only make inhibition irrelevant without notifying the
+        // client, and key interception is gated on the focused surface
+        // (keybinds::shortcuts_inhibited).
+        use smithay::wayland::seat::WaylandFocus;
+        let focused = self
+            .keyboard
+            .current_focus()
+            .and_then(|focus| focus.wl_surface().map(|surface| surface.into_owned()));
+        if focused.as_ref() == Some(inhibitor.wl_surface()) && !inhibitor.is_active() {
+            inhibitor.activate();
+        }
+    }
+}
+smithay::delegate_keyboard_shortcuts_inhibit!(Villain);
+
 impl OutputHandler for Villain {}
 
 impl XdgShellHandler for Villain {

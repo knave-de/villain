@@ -417,6 +417,25 @@ pub fn handle_keyboard_event<B: InputBackend>(
     handle_keyboard_key(state, event.key_code(), event.state(), event.time_msec());
 }
 
+/// True while the focused client holds an active keyboard-shortcuts
+/// inhibitor: every key must reach it instead of the binding table, so
+/// recorders, terminal emulators and remote clients never lose chords.
+/// Inhibition applies to the surface keyboard focus, which is per seat.
+pub(crate) fn shortcuts_inhibited(state: &Villain) -> bool {
+    use smithay::wayland::keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitorSeat;
+    use smithay::wayland::seat::WaylandFocus;
+    let Some(focus) = state.keyboard.current_focus() else {
+        return false;
+    };
+    let Some(surface) = focus.wl_surface() else {
+        return false;
+    };
+    state
+        .seat
+        .keyboard_shortcuts_inhibitor_for_surface(&surface)
+        .is_some_and(|inhibitor| inhibitor.is_active())
+}
+
 pub(crate) fn handle_keyboard_key(
     state: &mut Villain,
     code: Keycode,
@@ -428,6 +447,7 @@ pub(crate) fn handle_keyboard_key(
     let serial = SERIAL_COUNTER.next_serial();
     let (result, mods_changed) =
         keyboard.input_intercept(state, code, key_state, |state, mods, key| {
+            let inhibited = shortcuts_inhibited(state);
             if !pressed
                 && state
                     .pending_modifier
@@ -436,6 +456,13 @@ pub(crate) fn handle_keyboard_key(
                 && let Some((_, dispatch)) = state.pending_modifier.take()
             {
                 state.suppressed_keys.remove(&code);
+                // The press was consumed before the inhibitor activated:
+                // swallow the release instead of completing the binding, but
+                // still keep the key from the client. Smithay's intercept path
+                // below re-delivers the corrected modifier state either way.
+                if inhibited {
+                    return FilterResult::Intercept(None);
+                }
                 return FilterResult::Intercept(Some(KeyboardAction::Dispatch(dispatch)));
             }
             if !pressed && state.suppressed_keys.remove(&code) {
@@ -518,7 +545,11 @@ pub(crate) fn handle_keyboard_key(
                     return FilterResult::Intercept(Some(action));
                 }
             }
+            // Inhibition only removes the configurable bindings. Session
+            // escape chords above run regardless, so an inhibited client can
+            // never lock the user out of VT switching or session quit.
             if pressed
+                && !inhibited
                 && let Some(action) = state.config.keybinds.find_modifier_only(
                     &key.raw_syms(),
                     mods.ctrl,
@@ -532,6 +563,7 @@ pub(crate) fn handle_keyboard_key(
                 return FilterResult::Intercept(None);
             }
             if pressed
+                && !inhibited
                 && let Some(action) = state.config.keybinds.find(
                     &key.raw_syms(),
                     mods.ctrl,

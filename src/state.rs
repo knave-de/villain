@@ -20,6 +20,9 @@ use smithay::{
     wayland::{
         compositor::{CompositorClientState, CompositorState},
         cursor_shape::CursorShapeManagerState,
+        keyboard_shortcuts_inhibit::{
+            KeyboardShortcutsInhibitState, KeyboardShortcutsInhibitorSeat,
+        },
         output::OutputManagerState,
         selection::{
             data_device::{DataDeviceState, set_data_device_focus},
@@ -91,6 +94,7 @@ pub struct Villain {
     pub primary_selection_state: PrimarySelectionState,
     pub wlr_data_control_state: wlr_data_control::DataControlState,
     pub ext_data_control_state: ext_data_control::DataControlState,
+    pub keyboard_shortcuts_inhibit_state: KeyboardShortcutsInhibitState,
     #[allow(dead_code)]
     pub cursor_shape_state: CursorShapeManagerState,
     #[allow(dead_code)]
@@ -217,6 +221,9 @@ impl Villain {
             primary_selection_state,
             wlr_data_control_state,
             ext_data_control_state,
+            keyboard_shortcuts_inhibit_state: KeyboardShortcutsInhibitState::new::<Self>(
+                &display_handle,
+            ),
             cursor_shape_state: CursorShapeManagerState::new::<Self>(&display_handle),
             output_manager_state: OutputManagerState::new_with_xdg_output::<Self>(&display_handle),
             seat_state,
@@ -316,6 +323,22 @@ impl SeatHandler for Villain {
         });
         set_data_device_focus(&self.display_handle, seat, client.clone());
         set_primary_focus(&self.display_handle, seat, client);
+
+        // Keyboard-shortcuts inhibitors activate once, when their surface
+        // first takes keyboard focus. The protocol reserves the `inactive`
+        // event for the compositor explicitly disabling an inhibitor: focus
+        // loss, unmapping and destruction only make inhibition temporarily
+        // irrelevant, so Villain never emits `inactive` across focus changes
+        // and gates key interception on the focused surface instead
+        // (keybinds::shortcuts_inhibited).
+        let surface = focused
+            .and_then(smithay::wayland::seat::WaylandFocus::wl_surface)
+            .and_then(|surface| seat.keyboard_shortcuts_inhibitor_for_surface(&surface));
+        if let Some(inhibitor) = surface
+            && !inhibitor.is_active()
+        {
+            inhibitor.activate();
+        }
     }
 }
 
