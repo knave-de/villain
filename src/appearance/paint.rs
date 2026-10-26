@@ -29,10 +29,12 @@ pub(super) fn render_texture<
     .map_err(EffectError::Renderer)?;
     let mut framebuffer = renderer.bind(&mut texture).map_err(EffectError::Renderer)?;
     let mut tracker = OutputDamageTracker::new((size.w, size.h), 1.0, Transform::Normal);
-    let result = tracker
+    // No CPU wait: this runs on the compositor event thread every effect
+    // frame. Smithay fences the texture write and makes later samplers on this
+    // context wait GPU-side, so ordering holds without blocking input or IPC.
+    tracker
         .render_output(renderer, &mut framebuffer, 0, elements, clear)
         .map_err(EffectError::Damage)?;
-    result.sync.wait().map_err(EffectError::Interrupted)?;
     drop(framebuffer);
     Ok(texture)
 }

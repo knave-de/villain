@@ -50,7 +50,6 @@ pub(crate) enum EffectError {
     TargetTooLarge,
     Renderer(GlesError),
     Damage(smithay::backend::renderer::damage::Error<GlesError>),
-    Interrupted(smithay::backend::renderer::sync::Interrupted),
     OutsideOutput,
 }
 impl std::fmt::Display for EffectError {
@@ -59,7 +58,6 @@ impl std::fmt::Display for EffectError {
             Self::TargetTooLarge => f.write_str("effect target exceeds 36 Mi pixels"),
             Self::Renderer(error) => write!(f, "effect renderer failed: {error}"),
             Self::Damage(error) => write!(f, "effect composition failed: {error}"),
-            Self::Interrupted(error) => error.fmt(f),
             Self::OutsideOutput => f.write_str("blur rectangle outside output"),
         }
     }
