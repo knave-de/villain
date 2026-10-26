@@ -2,13 +2,18 @@
 
 use smithay::{
     backend::renderer::utils::on_commit_buffer_handler,
+    reexports::calloop::Interest,
     reexports::wayland_server::{
-        Client,
+        Client, Resource,
         protocol::{wl_buffer, wl_surface::WlSurface},
     },
     wayland::{
         buffer::BufferHandler,
-        compositor::{CompositorClientState, CompositorHandler, CompositorState, with_states},
+        compositor::{
+            BufferAssignment, CompositorClientState, CompositorHandler, CompositorState,
+            SurfaceAttributes, add_blocker, add_pre_commit_hook, with_states,
+        },
+        dmabuf::get_dmabuf,
         output::OutputHandler,
         shell::xdg::{
             PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
@@ -50,6 +55,43 @@ impl CompositorHandler for Villain {
         } else {
             unreachable!("Wayland client has no compositor state")
         }
+    }
+
+    fn new_surface(&mut self, surface: &WlSurface) {
+        // Defer a commit until its DMA-BUF's implicit fences signal, so the
+        // renderer never samples (and waits on) a buffer the client's GPU work
+        // has not finished. The previous state stays current meanwhile and the
+        // event loop keeps serving input and other clients.
+        add_pre_commit_hook::<Self, _>(surface, |state, _dh, surface| {
+            let dmabuf = with_states(surface, |states| {
+                match states
+                    .cached_state
+                    .get::<SurfaceAttributes>()
+                    .pending()
+                    .buffer
+                    .as_ref()
+                {
+                    Some(BufferAssignment::NewBuffer(buffer)) => get_dmabuf(buffer).cloned().ok(),
+                    _ => None,
+                }
+            });
+            let (Some(dmabuf), Some(client)) = (dmabuf, surface.client()) else {
+                return;
+            };
+            let Ok((blocker, source)) = dmabuf.generate_blocker(Interest::READ) else {
+                return;
+            };
+            let inserted = state.loop_handle.insert_source(source, move |_, _, state| {
+                let dh = state.display_handle.clone();
+                state
+                    .client_compositor_state(&client)
+                    .blocker_cleared(state, &dh);
+                Ok(())
+            });
+            if inserted.is_ok() {
+                add_blocker(surface, blocker);
+            }
+        });
     }
 
     fn commit(&mut self, surface: &WlSurface) {
