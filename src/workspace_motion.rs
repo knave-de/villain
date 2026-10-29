@@ -24,6 +24,9 @@ impl WorkspaceMotion {
     pub fn visible(&self, workspace: usize) -> bool {
         self.tracks.iter().any(|track| track.workspace == workspace)
     }
+    pub(crate) fn highest_workspace(&self) -> Option<usize> {
+        self.tracks.iter().map(|track| track.workspace).max()
+    }
     pub fn scenes(&self, now: Instant) -> Vec<(usize, f64)> {
         self.tracks
             .iter()
@@ -177,6 +180,7 @@ impl Villain {
                     TimeoutAction::ToDuration(interval)
                 } else {
                     state.workspace_motion.timer = None;
+                    state.trim_dynamic_workspaces();
                     state.refresh_pointer_surface(0);
                     TimeoutAction::Drop
                 }
