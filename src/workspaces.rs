@@ -1144,6 +1144,7 @@ impl Villain {
         if source != index {
             self.start_workspace_motion(source, index, direction);
         }
+        self.trim_dynamic_workspaces();
     }
 
     pub(crate) fn switch_workspace_immediate(&mut self, index: usize) {
@@ -1173,7 +1174,6 @@ impl Villain {
             self.last_workspace = Some(self.active_workspace);
         }
         self.active_workspace = index;
-        self.trim_dynamic_workspaces();
         self.relayout_active_workspace();
     }
 

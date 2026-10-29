@@ -120,6 +120,7 @@ impl Villain {
         self.gestures.transition_device = None;
         if self.gestures.transition.take().is_some() {
             self.request_repaint();
+            self.trim_dynamic_workspaces();
         }
         self.retire_motion_timer();
     }
@@ -321,6 +322,7 @@ impl Villain {
                     Some(Tween::new(transition.offset, end, Instant::now(), SETTLE));
                 self.gestures.transition_device = Some(stream.device);
                 self.gestures.transition = Some(transition);
+                self.trim_dynamic_workspaces();
                 self.request_repaint();
                 self.schedule_motion_tick();
             }

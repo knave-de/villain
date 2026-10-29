@@ -106,6 +106,11 @@ impl Villain {
             )
             .chain(self.children.iter().map(|(index, _)| *index))
             .chain(self.workspace_motion.highest_workspace())
+            .chain(
+                self.gestures
+                    .transition
+                    .map(|transition| transition.source.max(transition.target)),
+            )
             .max();
         let retained = fixed_count
             .saturating_add(1)
