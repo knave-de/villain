@@ -256,6 +256,10 @@ impl Villain {
                         self.stop_swipe_visual();
                         return;
                     };
+                    if !self.ensure_workspace_exists(target) {
+                        self.stop_swipe_visual();
+                        return;
+                    }
                     self.gestures.transition_device = Some(device.into());
                     self.gestures.transition = Some(Transition {
                         source,
@@ -335,6 +339,7 @@ impl Villain {
         if sample.finished {
             self.gestures.transition = None;
             self.gestures.transition_device = None;
+            self.trim_dynamic_workspaces();
         }
         true
     }
