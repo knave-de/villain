@@ -38,10 +38,93 @@ pub struct RuntimeConfig {
     pub input: InputConfig,
     /// Ordered `[[compositor.device]]` rules; later matches override earlier ones.
     pub devices: Vec<knave_config::CompositorDeviceConfig>,
+    pub window_rules: WindowRulesRuntime,
     pub keybinds: KeybindRegistry,
     pub gestures: Vec<knave_config::gesture::GestureBinding>,
     pub environment: BTreeMap<String, String>,
     path: PathBuf,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct WindowRulesRuntime {
+    applications: Vec<knave_config::WindowApplicationRule>,
+    rules: Vec<CompiledWindowRule>,
+}
+
+#[derive(Clone, Debug)]
+struct CompiledWindowRule {
+    matcher: knave_config::WindowRuleMatch,
+    title_regex: Option<regex::Regex>,
+    set: knave_config::WindowRuleActions,
+}
+
+impl WindowRulesRuntime {
+    fn compile(config: &knave_config::WindowRulesConfig) -> Self {
+        Self {
+            applications: config.application.clone(),
+            rules: config
+                .rule
+                .iter()
+                .map(|rule| CompiledWindowRule {
+                    matcher: rule.matcher.clone(),
+                    title_regex: rule.matcher.title_regex.as_ref().map(|pattern| {
+                        regex::RegexBuilder::new(pattern)
+                            .size_limit(1 << 20)
+                            .dfa_size_limit(1 << 20)
+                            .build()
+                            .expect("Knave config validates window rule regexes")
+                    }),
+                    set: rule.set.clone(),
+                })
+                .collect(),
+        }
+    }
+
+    pub fn for_window(&self, app_id: &str, title: &str) -> knave_config::WindowRuleActions {
+        let mut result = knave_config::WindowRuleActions::default();
+        for rule in &self.applications {
+            if rule.app_id == app_id {
+                overlay_window_actions(&mut result, &rule.set);
+            }
+        }
+        for rule in &self.rules {
+            let matcher = &rule.matcher;
+            let matches = matcher
+                .app_id
+                .as_deref()
+                .is_none_or(|value| value == app_id)
+                && matcher
+                    .title_contains
+                    .as_deref()
+                    .is_none_or(|value| title.contains(value))
+                && rule
+                    .title_regex
+                    .as_ref()
+                    .is_none_or(|regex| regex.is_match(title));
+            if matches {
+                overlay_window_actions(&mut result, &rule.set);
+            }
+        }
+        result
+    }
+}
+
+fn overlay_window_actions(
+    target: &mut knave_config::WindowRuleActions,
+    source: &knave_config::WindowRuleActions,
+) {
+    if source.placement.is_some() {
+        target.placement = source.placement;
+    }
+    if source.center.is_some() {
+        target.center = source.center;
+    }
+    if source.stay_on_top.is_some() {
+        target.stay_on_top = source.stay_on_top;
+    }
+    if source.workspace.is_some() {
+        target.workspace = source.workspace;
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -124,6 +207,7 @@ impl RuntimeConfig {
                 focus_follows_mouse: compositor.input.focus_follows_mouse,
             },
             devices: compositor.device.clone(),
+            window_rules: WindowRulesRuntime::compile(&compositor.window_rules),
             gestures: crate::gestures::bindings(&compositor.gesture),
             keybinds,
             environment,
@@ -395,6 +479,56 @@ args = ["bemenu"]
             ),
             Some(Dispatch::Spawn(vec!["kitty".into()]))
         );
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn window_rules_apply_in_layers_and_later_rules_override_only_set_fields() {
+        let directory =
+            std::env::temp_dir().join(format!("villain-window-rules-{}", std::process::id()));
+        fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("config.toml");
+        fs::write(
+            &path,
+            r#"
+[[compositor.window_rules.application]]
+app_id = "firefox"
+workspace = 3
+placement = "tiled"
+[[compositor.window_rules.rule]]
+[compositor.window_rules.rule.match]
+app_id = "firefox"
+title_contains = "Picture"
+[compositor.window_rules.rule.set]
+placement = "floating"
+center = true
+[[compositor.window_rules.rule]]
+[compositor.window_rules.rule.match]
+title_regex = '(?i)^picture.*in.picture$'
+[compositor.window_rules.rule.set]
+stay_on_top = true
+"#,
+        )
+        .unwrap();
+
+        let config = RuntimeConfig::load_from(path).unwrap();
+        let matched = config
+            .window_rules
+            .for_window("firefox", "Picture-in-Picture");
+        assert_eq!(
+            matched.placement,
+            Some(knave_config::WindowPlacement::Floating)
+        );
+        assert_eq!(matched.center, Some(true));
+        assert_eq!(matched.workspace, Some(3));
+        assert_eq!(matched.stay_on_top, Some(true));
+        let unrelated = config.window_rules.for_window("firefox", "Settings");
+        assert_eq!(
+            unrelated.placement,
+            Some(knave_config::WindowPlacement::Tiled)
+        );
+        assert_eq!(unrelated.workspace, Some(3));
+        assert_eq!(unrelated.center, None);
         fs::remove_dir_all(directory).unwrap();
     }
 

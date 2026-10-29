@@ -12,6 +12,7 @@ resolver = "3"
 [dependencies]
 knave-capture-protocol = { git = "https://github.com/knave-de/knave.git", rev = "f1708b7bc1aaf5695c80106af51cc41149f565cd", features = ["server"] }
 libc = "0.2"
+regex = "1"
 toml = "0.9"
 smithay = { version = "0.7.0", default-features = false, features = [
     "backend_winit",
