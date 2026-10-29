@@ -472,6 +472,9 @@ impl Villain {
         };
         changed |= entry.floating != geometry;
         entry.floating = geometry;
+        if moved_from.is_some() {
+            self.trim_dynamic_workspaces();
+        }
         if changed {
             self.desktop_state_dirty = true;
             if index == self.active_workspace || moved_from == Some(self.active_workspace) {
