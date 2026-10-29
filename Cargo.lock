@@ -983,7 +983,7 @@ dependencies = [
 [[package]]
 name = "knave-config"
 version = "0.1.0"
-source = "git+https://github.com/knave-de/knave.git?rev=c56a2b811e29d611e52965c1725629d1f28bb91e#c56a2b811e29d611e52965c1725629d1f28bb91e"
+source = "git+https://github.com/knave-de/knave.git?rev=45f0a735a9ba1d3afb09650c7a5b13cf75f8b252#45f0a735a9ba1d3afb09650c7a5b13cf75f8b252"
 dependencies = [
  "serde",
  "thiserror 2.0.21",
