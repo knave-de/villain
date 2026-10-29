@@ -962,6 +962,7 @@ impl Villain {
             floating_override: None,
             saved_floating: None,
         });
+        self.trim_dynamic_workspaces();
         self.refresh_window_hints(&window);
         tracing::info!(window = id.0, workspace = index + 1, "window opened");
         let index = self.workspace_for_window(&window).unwrap_or(index);
@@ -1041,6 +1042,9 @@ impl Villain {
         if source == target {
             return true;
         }
+        if !self.ensure_workspace_exists(target) {
+            return false;
+        }
         self.cancel_swipe(0);
         self.cancel_workspace_motion();
         self.release_pointer_buttons();
@@ -1109,6 +1113,7 @@ impl Villain {
         if maximized.is_some() {
             destination.maximized = maximized;
         }
+        self.trim_dynamic_workspaces();
         self.configure_workspace(target);
         self.relayout_active_workspace();
         true
@@ -1128,7 +1133,7 @@ impl Villain {
         index: usize,
         direction: crate::workspace_navigation::Direction,
     ) {
-        if index >= self.workspaces.len() {
+        if !self.ensure_workspace_exists(index) {
             return;
         }
         let source = self.active_workspace;
@@ -1139,7 +1144,7 @@ impl Villain {
     }
 
     pub(crate) fn switch_workspace_immediate(&mut self, index: usize) {
-        if index >= self.workspaces.len() {
+        if !self.ensure_workspace_exists(index) {
             return;
         }
         self.cancel_swipe(0);
@@ -1165,6 +1170,7 @@ impl Villain {
             self.last_workspace = Some(self.active_workspace);
         }
         self.active_workspace = index;
+        self.trim_dynamic_workspaces();
         self.relayout_active_workspace();
     }
 
@@ -2204,6 +2210,7 @@ impl Villain {
                 self.space.unmap_elem(&window);
                 self.unmanaged_x11_windows
                     .retain(|entry| entry.window != window);
+                self.trim_dynamic_workspaces();
                 self.refresh_unmanaged_x11_windows();
                 self.sync_x11_stacking();
                 self.refresh_pointer(0);
@@ -2239,6 +2246,7 @@ impl Villain {
                     .retain(|candidate| candidate != &window);
             }
         }
+        self.trim_dynamic_workspaces();
         self.relayout_active_workspace();
     }
 }

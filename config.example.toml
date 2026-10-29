@@ -25,6 +25,9 @@ environment_file = "environment"
 # Opt in to skipping empty slots for next/previous shortcuts and workspace swipes.
 # Number shortcuts and bar clicks can still select any workspace.
 [compositor.workspace]
+# Keep this many numbered workspaces permanently; the dynamic tail keeps one
+# empty workspace available after the highest occupied workspace.
+predefined = 1
 skip_empty = false
 
 [compositor.input]

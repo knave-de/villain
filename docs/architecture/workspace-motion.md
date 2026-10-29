@@ -22,12 +22,13 @@ existing switch path. Presentation tracks retain render-only workspace IDs and
 horizontal offsets. Incoming windows are not moved/configured every animation
 frame. Existing live workspace scenes provide windows and wallpaper; panels and
 cursor remain stationary. Direct numbered/last-workspace selections use numeric
-direction; next/previous preserve travel direction through wrap and skip-empty.
+direction; next/previous preserve travel direction through skipped slots and
+dynamic workspace creation.
 
 New targets start adjacent to the departing active scene's sampled position.
 Existing targets retarget from their sampled positions. Earlier outgoing tracks
 finish independently, with the newest destination in front if motion overlaps.
-There is at most one track per workspace (ten today), no event queue and no
+There is at most one track per workspace (up to 4096), no event queue and no
 captured framebuffer. Only scenes intersecting the output are composed; the
 existing bounded scene-texture cache remains the resource owner. Repeated active
 selection does not restart the presentation timeline.
@@ -60,7 +61,7 @@ and pre-backend initialization do not start command presentation.
 ## Verification
 
 Deterministic tests cover elapsed-time sampling, skipped frames, exact completion,
-retargeting/reversal continuity, wrapping and track bounds. Real Wayland tests
+retargeting/reversal continuity, dynamic-tail navigation and track bounds. Real Wayland tests
 cover logical focus/history, reserved gestures and timer cleanup. Frozen-bundle
 nested checks must assert intermediate displacement, rendered source/destination,
 stationary panels, rapid retargeting, interruptions and idle/stress resource bounds.

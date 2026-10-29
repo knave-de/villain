@@ -117,7 +117,7 @@ pub struct Villain {
     pub pointer: smithay::input::pointer::PointerHandle<Self>,
     pub pointer_location: smithay::utils::Point<f64, smithay::utils::Logical>,
     pub cursor: CursorState,
-    pub workspaces: [Workspace; 10],
+    pub workspaces: Vec<Workspace>,
     pub unmanaged_x11_windows: Vec<crate::xwayland::UnmanagedWindow>,
     pub active_workspace: usize,
     pub(crate) last_workspace: Option<usize>,
@@ -168,6 +168,7 @@ impl Villain {
             .add_keyboard(Default::default(), 200, 25)
             .expect("initialize keyboard");
         let pointer = seat.add_pointer();
+        let initial_workspace_count = (config.workspace.predefined as usize + 1).max(2);
 
         crate::capture::init(&display_handle);
         smithay::wayland::pointer_gestures::PointerGesturesState::new::<Self>(&display_handle);
@@ -246,7 +247,9 @@ impl Villain {
             pointer,
             pointer_location: (0.0, 0.0).into(),
             cursor: CursorState::new(),
-            workspaces: std::array::from_fn(|_| Workspace::default()),
+            workspaces: std::iter::repeat_with(Workspace::default)
+                .take(initial_workspace_count)
+                .collect(),
             unmanaged_x11_windows: Vec::new(),
             active_workspace: 0,
             last_workspace: None,

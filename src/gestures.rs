@@ -83,6 +83,7 @@ pub(crate) struct Transition {
     pub target: usize,
     pub direction: Direction,
     pub offset: f64,
+    target_was_occupied: bool,
     settle: Option<Tween>,
 }
 #[derive(Default)]
@@ -150,10 +151,9 @@ impl Villain {
         }
         let target_disappeared = self.config.workspace.skip_empty
             && self.gestures.reserved()
-            && self
-                .gestures
-                .transition
-                .is_some_and(|transition| !self.workspace_occupied(transition.target));
+            && self.gestures.transition.is_some_and(|transition| {
+                transition.target_was_occupied && !self.workspace_occupied(transition.target)
+            });
         if target_disappeared
             || ((self.gestures.reserved()
                 || self.gestures.transition.is_some()
@@ -262,6 +262,14 @@ impl Villain {
                         target,
                         direction,
                         offset,
+                        target_was_occupied: previous
+                            .filter(|preview| {
+                                preview.source == source && preview.direction == direction
+                            })
+                            .map_or_else(
+                                || self.workspace_occupied(target),
+                                |preview| preview.target_was_occupied,
+                            ),
                         settle: None,
                     });
                     self.request_repaint();

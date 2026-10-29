@@ -387,8 +387,8 @@ fn parse_dispatch(spec: &BindSpec) -> Result<Dispatch, String> {
             let workspace = spec.args[0]
                 .parse()
                 .map_err(|_| "workspace argument must be a number".to_string())?;
-            if !(1..=10).contains(&workspace) {
-                return Err("workspace argument must be between 1 and 10".into());
+            if workspace == 0 {
+                return Err("workspace argument must be at least 1".into());
             }
             Ok(if spec.dispatch == "move-to-workspace" {
                 Dispatch::MoveFocusedToWorkspace(workspace)
@@ -813,9 +813,10 @@ mod tests {
             registry.find(&[Keysym::new(keysyms::KEY_b)], false, false, false, true),
             Some(Dispatch::MoveFocusedToWorkspace(10))
         );
-        for args in [vec![], vec!["0"], vec!["11"], vec!["x"], vec!["1", "2"]] {
+        for args in [vec![], vec!["0"], vec!["x"], vec!["1", "2"]] {
             assert!(parse_dispatch(&spec("MOD+B", "move-to-workspace", &args)).is_err());
         }
+        assert!(parse_dispatch(&spec("MOD+B", "workspace", &["11"])).is_ok());
     }
 
     #[test]

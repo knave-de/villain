@@ -47,7 +47,7 @@ fn sparse_navigation_and_preview_lifecycle() {
             state.dispatch(Action::NextWorkspace).unwrap();
             assert_eq!(state.active_workspace, 6);
             state.dispatch(Action::NextWorkspace).unwrap();
-            assert_eq!(state.active_workspace, 0, "wrap sparse slots");
+            assert_eq!(state.active_workspace, 7, "advance to the dynamic tail");
             state.dispatch(Action::PreviousWorkspace).unwrap();
             assert_eq!(state.active_workspace, 6);
             state.dispatch(Action::FocusWorkspace(3)).unwrap();
