@@ -114,6 +114,14 @@ struct CachedPane {
 }
 const MAX_PIXELS: i64 = 36 * 1024 * 1024;
 
+fn scene_render_scale(target_scale: f64, has_effects: bool) -> f64 {
+    if has_effects { 1.0 } else { target_scale }
+}
+
+fn physical_window_crop(rect: Geometry, scale: f64) -> Rectangle<i32, Physical> {
+    rect.to_physical_precise_round(scale)
+}
+
 // Clip root/subsurface content even when visual effects are disabled. Resize
 // configures are asynchronous, and clients may keep buffers larger than a tile.
 fn window_elements(
@@ -121,12 +129,13 @@ fn window_elements(
     renderer: &mut GlesRenderer,
     rect: Geometry,
     clip: bool,
+    scale: f64,
 ) -> Vec<EffectElement> {
     if !clip {
         let elements: Vec<WaylandSurfaceRenderElement<GlesRenderer>> = window.render_elements(
             renderer,
-            (rect.loc - window.geometry().loc).to_physical_precise_round(1.0),
-            Scale::from(1.0),
+            (rect.loc - window.geometry().loc).to_physical_precise_round(scale),
+            Scale::from(scale),
             1.0,
         );
         return elements.into_iter().map(EffectElement::Surface).collect();
@@ -141,8 +150,8 @@ fn window_elements(
             render_elements_from_surface_tree(
                 renderer,
                 popup.wl_surface(),
-                (rect.loc + location - popup.geometry().loc).to_physical_precise_round(1.0),
-                Scale::from(1.0),
+                (rect.loc + location - popup.geometry().loc).to_physical_precise_round(scale),
+                Scale::from(scale),
                 1.0,
                 Kind::Unspecified,
             );
@@ -152,13 +161,13 @@ fn window_elements(
         render_elements_from_surface_tree(
             renderer,
             &root,
-            (rect.loc - window.geometry().loc).to_physical_precise_round(1.0),
-            Scale::from(1.0),
+            (rect.loc - window.geometry().loc).to_physical_precise_round(scale),
+            Scale::from(scale),
             1.0,
             Kind::Unspecified,
         );
     elements.extend(root_elements.into_iter().filter_map(|element| {
-        CropRenderElement::from_element(element, 1.0, rect.to_physical_precise_round(1.0))
+        CropRenderElement::from_element(element, scale, physical_window_crop(rect, scale))
             .map(EffectElement::CroppedSurface)
     }));
     elements
@@ -175,8 +184,9 @@ impl EffectsRenderer {
         renderer: &mut GlesRenderer,
         workspace: usize,
         layers: SceneLayers,
+        target_scale: f64,
     ) -> Result<Vec<EffectElement>, EffectError> {
-        let mut elements = self.base_scene(state, renderer, workspace, layers)?;
+        let mut elements = self.base_scene(state, renderer, workspace, layers, target_scale)?;
         if workspace == state.active_workspace
             && layers == SceneLayers::All
             && let Some(drag) = &state.interaction
@@ -200,7 +210,7 @@ impl EffectsRenderer {
                         0,
                         EffectElement::Solid(SolidColorRenderElement::new(
                             state.drag_marker_ids[index].clone(),
-                            rect.to_physical_precise_round(1.0),
+                            rect.to_physical_precise_round(target_scale),
                             CommitCounter::default(),
                             if index == 0 {
                                 [0.04, 0.07, 0.12, 0.18]
@@ -221,6 +231,7 @@ impl EffectsRenderer {
         renderer: &mut GlesRenderer,
         workspace: usize,
         layers: SceneLayers,
+        target_scale: f64,
     ) -> Result<Vec<EffectElement>, EffectError> {
         let size = state.output_size;
         let focused = state.keyboard.current_focus();
@@ -242,6 +253,39 @@ impl EffectsRenderer {
             lifted.1 = Rectangle::new(geometry.loc + drag.delta, geometry.size);
             windows.push(lifted);
         }
+        let any_effect = windows
+            .iter()
+            .any(|(_, _, fullscreen, maximized, tiled, _)| {
+                let a = &state.config.appearance;
+                let view = if *fullscreen {
+                    ViewEffects::NONE
+                } else if *maximized {
+                    a.views.maximized
+                } else if *tiled {
+                    a.views.tiled
+                } else {
+                    a.views.floating
+                };
+                (view.borders && a.border.width != Edges::default())
+                    || (view.radius && a.border.radius != Corners::default())
+                    || [&a.focused, &a.unfocused].into_iter().any(|style| {
+                        (view.opacity && style.opacity != 100)
+                            || (view.blur && style.blur.enabled && style.blur.radius > 0)
+                            || (view.shadows
+                                && [
+                                    &style.shadows.top,
+                                    &style.shadows.right,
+                                    &style.shadows.bottom,
+                                    &style.shadows.left,
+                                ]
+                                .iter()
+                                .any(|s| s.enabled))
+                    })
+            });
+        // Effects are composed into a logical-size offscreen target. The fast
+        // path returns elements directly to its caller, so use that caller's
+        // target scale for both surface placement and clipping.
+        let render_scale = scene_render_scale(target_scale, any_effect);
         let mut key = SceneKey {
             workspace,
             layers,
@@ -273,8 +317,8 @@ impl EffectsRenderer {
                     let elements: Vec<WaylandSurfaceRenderElement<GlesRenderer>> = layer
                         .render_elements(
                             renderer,
-                            geometry.loc.to_physical_precise_round(1.0),
-                            Scale::from(1.0),
+                            geometry.loc.to_physical_precise_round(render_scale),
+                            Scale::from(render_scale),
                             1.0,
                         );
                     let target = if matches!(layer.layer(), Layer::Top | Layer::Overlay) {
@@ -292,8 +336,13 @@ impl EffectsRenderer {
             let is_focused = KeyboardFocus::for_window(window) == focused;
             key.windows
                 .push((*rect, *fullscreen, *maximized, *tiled, is_focused));
-            let elements =
-                window_elements(window, renderer, *rect, *tiled || *fullscreen || *maximized);
+            let elements = window_elements(
+                window,
+                renderer,
+                *rect,
+                *tiled || *fullscreen || *maximized,
+                render_scale,
+            );
             key.sources.extend(elements.iter().map(source_key));
             sources.push(elements);
         }
@@ -310,43 +359,14 @@ impl EffectsRenderer {
                 let elements: Vec<WaylandSurfaceRenderElement<GlesRenderer>> = window
                     .render_elements(
                         renderer,
-                        (loc - window.geometry().loc).to_physical_precise_round(1.0),
-                        Scale::from(1.0),
+                        (loc - window.geometry().loc).to_physical_precise_round(render_scale),
+                        Scale::from(render_scale),
                         1.0,
                     );
                 key.sources.extend(elements.iter().map(source_key));
                 unmanaged.splice(0..0, elements.into_iter().map(EffectElement::Surface));
             }
         }
-        let any_effect = windows
-            .iter()
-            .any(|(_, _, fullscreen, maximized, tiled, _)| {
-                let a = &state.config.appearance;
-                let view = if *fullscreen {
-                    ViewEffects::NONE
-                } else if *maximized {
-                    a.views.maximized
-                } else if *tiled {
-                    a.views.tiled
-                } else {
-                    a.views.floating
-                };
-                (view.borders && a.border.width != Edges::default())
-                    || (view.radius && a.border.radius != Corners::default())
-                    || [&a.focused, &a.unfocused].into_iter().any(|style| {
-                        (view.opacity && style.opacity != 100)
-                            || (view.blur && style.blur.enabled && style.blur.radius > 0)
-                            || (view.shadows
-                                && [
-                                    &style.shadows.top,
-                                    &style.shadows.right,
-                                    &style.shadows.bottom,
-                                    &style.shadows.left,
-                                ]
-                                .iter()
-                                .any(|s| s.enabled))
-                    })
-            });
         if !any_effect {
             self.scenes
                 .retain(|entry| entry.key.workspace != workspace || entry.key.layers != layers);
@@ -594,15 +614,18 @@ impl EffectsRenderer {
         use smithay::backend::renderer::element::utils::{
             ConstrainAlign, ConstrainScaleBehavior, constrain_render_elements,
         };
-        let scene = self.scene(state, renderer, workspace, SceneLayers::Wallpaper)?;
+        let scene = self.scene(state, renderer, workspace, SceneLayers::Wallpaper, 1.0)?;
         let sources: Vec<_> = scene.iter().map(source_key).collect();
         if let Some(index) = self.panes.iter().position(|p| {
             p.workspace == workspace && p.geometry.size == geometry.size && p.sources == sources
         }) {
             let cached = self.panes.remove(index).expect("pane cache index");
+            let location = geometry
+                .loc
+                .to_physical_precise_round(state.config.output_scale);
             let element = EffectElement::Texture(texture_element(
                 &cached.texture,
-                (geometry.loc.x, geometry.loc.y),
+                (location.x, location.y),
                 1.0,
             ));
             self.panes.push_back(cached);
@@ -653,11 +676,11 @@ impl EffectsRenderer {
         );
         let texture = render_texture(renderer, geometry.size, &[element], [0.0; 4])?;
         let texture = TextureBuffer::from_texture(renderer, texture, 1, Transform::Normal, None);
-        let element = EffectElement::Texture(texture_element(
-            &texture,
-            (geometry.loc.x, geometry.loc.y),
-            1.0,
-        ));
+        let location = geometry
+            .loc
+            .to_physical_precise_round(state.config.output_scale);
+        let element =
+            EffectElement::Texture(texture_element(&texture, (location.x, location.y), 1.0));
         self.panes.push_back(CachedPane {
             workspace,
             geometry,

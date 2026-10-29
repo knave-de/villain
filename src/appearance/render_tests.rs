@@ -202,3 +202,25 @@ fn overview_cover_fills_a_wide_card_instead_of_letterboxing() {
     assert_eq!(scaled.len(), 1);
     assert_eq!(scaled[0].geometry(Scale::from(1.0)), card);
 }
+
+#[test]
+fn direct_window_crops_follow_fractional_output_scale() {
+    let logical: Geometry = Rectangle::from_size((853, 480).into());
+    for (output_scale, expected) in [(1.25, (1066, 600)), (1.5, (1280, 720))] {
+        let render_scale = scene_render_scale(output_scale, false);
+        assert_eq!(render_scale, output_scale);
+        assert_eq!(
+            physical_window_crop(logical, render_scale),
+            Rectangle::from_size(expected.into()),
+        );
+    }
+
+    // Window effects render to a logical-size texture, so their root crop stays
+    // in that texture's pixel coordinates and the final texture scales once.
+    assert_eq!(scene_render_scale(1.25, true), 1.0);
+    assert_eq!(scene_render_scale(1.5, true), 1.0);
+    assert_eq!(
+        physical_window_crop(logical, scene_render_scale(1.5, true)),
+        logical.to_physical_precise_round(1.0),
+    );
+}

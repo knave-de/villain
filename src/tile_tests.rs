@@ -21,7 +21,7 @@ pub(super) fn scene_pixels(state: &Villain, renderer: &mut GlesRenderer) -> Vec<
     use crate::appearance::render::{EffectsRenderer, SceneLayers};
     use smithay::utils::{Rectangle, Transform};
     let elements = EffectsRenderer::default()
-        .scene(state, renderer, 0, SceneLayers::All)
+        .scene(state, renderer, 0, SceneLayers::All, 1.0)
         .unwrap();
     let mut texture: GlesTexture = renderer
         .create_buffer(Fourcc::Abgr8888, (800, 600).into())

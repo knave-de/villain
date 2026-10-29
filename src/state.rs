@@ -20,6 +20,7 @@ use smithay::{
     wayland::{
         compositor::{CompositorClientState, CompositorState},
         cursor_shape::CursorShapeManagerState,
+        fractional_scale::FractionalScaleManagerState,
         keyboard_shortcuts_inhibit::{
             KeyboardShortcutsInhibitState, KeyboardShortcutsInhibitorSeat,
         },
@@ -33,6 +34,7 @@ use smithay::{
         shell::xdg::XdgShellState,
         shm::ShmState,
         socket::ListeningSocketSource,
+        viewporter::ViewporterState,
         xwayland_shell::XWaylandShellState,
     },
     xwayland::X11Wm,
@@ -99,6 +101,13 @@ pub struct Villain {
     pub cursor_shape_state: CursorShapeManagerState,
     #[allow(dead_code)]
     pub output_manager_state: OutputManagerState,
+    pub fractional_scale_manager_state: FractionalScaleManagerState,
+    pub viewporter_state: ViewporterState,
+    pub fractional_scale_surfaces: Vec<
+        smithay::reexports::wayland_server::Weak<
+            smithay::reexports::wayland_server::protocol::wl_surface::WlSurface,
+        >,
+    >,
 
     // XDG shell dispatch needs to know what a compositor considers a seat,
     // even before Villain creates real keyboard or pointer devices.
@@ -226,6 +235,11 @@ impl Villain {
             ),
             cursor_shape_state: CursorShapeManagerState::new::<Self>(&display_handle),
             output_manager_state: OutputManagerState::new_with_xdg_output::<Self>(&display_handle),
+            fractional_scale_manager_state: FractionalScaleManagerState::new::<Self>(
+                &display_handle,
+            ),
+            viewporter_state: ViewporterState::new::<Self>(&display_handle),
+            fractional_scale_surfaces: Vec::new(),
             seat_state,
             seat,
             keyboard,
@@ -256,6 +270,46 @@ impl Villain {
 
     pub fn request_repaint(&mut self) {
         self.repaint_needed = true;
+    }
+
+    pub fn apply_output_scale(&mut self, scale: f64) {
+        let logical_size = if let Some(winit) = self.winit.as_mut() {
+            Some(winit.set_scale(scale))
+        } else if let Some(tty) = self.tty.as_mut() {
+            tty.set_scale(scale)
+        } else {
+            None
+        };
+        if let Some(size) = logical_size {
+            let previous_size = self.output_size;
+            if previous_size.w > 0 && previous_size.h > 0 && size.w > 0 && size.h > 0 {
+                self.pointer_location = (
+                    self.pointer_location.x * f64::from(size.w) / f64::from(previous_size.w),
+                    self.pointer_location.y * f64::from(size.h) / f64::from(previous_size.h),
+                )
+                    .into();
+            }
+            self.output_size = size;
+            self.relayout_active_workspace();
+            self.overview_panes.clear();
+            self.pending_overview_panes = None;
+            self.publish_output_scale(scale);
+            self.request_repaint();
+        }
+    }
+
+    pub(crate) fn publish_output_scale(&mut self, scale: f64) {
+        self.fractional_scale_surfaces.retain(|weak| {
+            let Ok(surface) = weak.upgrade() else {
+                return false;
+            };
+            smithay::wayland::compositor::with_states(&surface, |states| {
+                smithay::wayland::fractional_scale::with_fractional_scale(states, |fractional| {
+                    fractional.set_preferred_scale(scale);
+                });
+            });
+            true
+        });
     }
 
     /// Schedule exactly one future wake-up for an animated server cursor.

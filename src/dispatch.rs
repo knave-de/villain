@@ -143,12 +143,17 @@ impl Villain {
                     .config
                     .reload()
                     .map_err(|error| DispatchError::Config(error.to_string()))?;
+                let output_scale_changed = self.config.output_scale != config.output_scale;
                 self.cancel_swipe(0);
                 self.cancel_workspace_motion();
                 self.release_pointer_buttons();
                 self.appearance_renderer.clear();
                 self.config = config;
-                self.relayout_active_workspace();
+                if output_scale_changed {
+                    self.apply_output_scale(self.config.output_scale);
+                } else {
+                    self.relayout_active_workspace();
+                }
                 self.request_repaint();
                 crate::session::prepare_environment(self);
                 if self.owns_session {

@@ -66,6 +66,7 @@ pub(crate) fn elements(
                     renderer,
                     state.pointer_location - rect.loc.to_f64(),
                     state.start_time.elapsed(),
+                    state.config.output_scale,
                 )
                 .into_iter()
                 .map(WindowSceneElement::Cursor),

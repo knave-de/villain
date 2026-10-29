@@ -56,6 +56,7 @@ pub fn elements(
         use smithay::{
             backend::renderer::element::AsRenderElements, desktop::layer_map_for_output,
         };
+        let output_scale = state.config.output_scale;
         // Keep shell UI stationary, above the two clipped workspace scenes.
         for output in state.space.outputs() {
             let map = layer_map_for_output(output);
@@ -73,8 +74,8 @@ pub fn elements(
                         >,
                     > = layer.render_elements(
                         renderer,
-                        geometry.loc.to_physical_precise_round(1.0),
-                        Scale::from(1.0),
+                        geometry.loc.to_physical_precise_round(output_scale),
+                        Scale::from(output_scale),
                         1.0,
                     );
                     result.splice(
@@ -99,11 +100,19 @@ pub fn elements(
                     renderer,
                     workspace,
                     crate::appearance::render::SceneLayers::Wallpaper,
+                    state.config.output_scale,
                 )?;
                 result.extend(scene.into_iter().filter_map(|element| {
-                    let shifted =
-                        RelocateRenderElement::from_element(element, (x, 0), Relocate::Relative);
-                    CropRenderElement::from_element(shifted, 1.0, clip)
+                    let physical_origin =
+                        smithay::utils::Point::<i32, smithay::utils::Logical>::from((x, 0))
+                            .to_physical_precise_round(output_scale);
+                    let physical_clip = clip.to_physical_precise_round(output_scale);
+                    let shifted = RelocateRenderElement::from_element(
+                        element,
+                        physical_origin,
+                        Relocate::Relative,
+                    );
+                    CropRenderElement::from_element(shifted, output_scale, physical_clip)
                         .map(OverviewRenderElement::Swipe)
                 }));
             }
@@ -134,8 +143,10 @@ pub fn elements(
                         >,
                     > = layer.render_elements(
                         renderer,
-                        geometry.loc.to_physical_precise_round(1.0),
-                        Scale::from(1.0),
+                        geometry
+                            .loc
+                            .to_physical_precise_round(state.config.output_scale),
+                        Scale::from(state.config.output_scale),
                         1.0,
                     );
                     result.extend(elements.into_iter().map(OverviewRenderElement::Overlay));
@@ -176,7 +187,13 @@ pub fn elements(
         result.push(OverviewRenderElement::ScreenshotOverlay(
             SolidColorRenderElement::new(
                 state.overview_backdrop_id.clone(),
-                Rectangle::from_size((output.w, output.h).into()),
+                Rectangle::from_size(
+                    (
+                        (f64::from(output.w) * state.config.output_scale).round() as i32,
+                        (f64::from(output.h) * state.config.output_scale).round() as i32,
+                    )
+                        .into(),
+                ),
                 CommitCounter::default(),
                 [0.0, 0.0, 0.0, 0.5],
                 Kind::Unspecified,
@@ -189,6 +206,7 @@ pub fn elements(
         renderer,
         state.active_workspace,
         crate::appearance::render::SceneLayers::All,
+        state.config.output_scale,
     );
     state.appearance_renderer = effects;
     result.extend(scene?.into_iter().map(OverviewRenderElement::Scene));
