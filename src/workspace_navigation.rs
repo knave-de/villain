@@ -29,8 +29,8 @@ fn target(
     }
     match direction {
         Direction::Next => {
-            for index in source + 1..count {
-                if !skip_empty || occupied[index] {
+            for (index, is_occupied) in occupied.iter().enumerate().skip(source + 1) {
+                if !skip_empty || *is_occupied {
                     return Some(index);
                 }
             }
