@@ -48,6 +48,7 @@ pub fn capture(
                 &mut tty.renderer,
                 index,
                 crate::appearance::render::SceneLayers::Wallpaper,
+                1.0,
             )
             .map_err(|error| error.to_string())
             .and_then(|elements| render(&mut tty.renderer, elements, output_size, width, height));
@@ -60,6 +61,7 @@ pub fn capture(
                 winit.renderer(),
                 index,
                 crate::appearance::render::SceneLayers::Wallpaper,
+                1.0,
             )
             .map_err(|error| error.to_string())
             .and_then(|elements| render(winit.renderer(), elements, output_size, width, height));

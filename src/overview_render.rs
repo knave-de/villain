@@ -100,6 +100,7 @@ pub fn elements(
                     renderer,
                     workspace,
                     crate::appearance::render::SceneLayers::Wallpaper,
+                    state.config.output_scale,
                 )?;
                 result.extend(scene.into_iter().filter_map(|element| {
                     let physical_origin =
@@ -111,7 +112,7 @@ pub fn elements(
                         physical_origin,
                         Relocate::Relative,
                     );
-                    CropRenderElement::from_element(shifted, 1.0, physical_clip)
+                    CropRenderElement::from_element(shifted, output_scale, physical_clip)
                         .map(OverviewRenderElement::Swipe)
                 }));
             }
@@ -205,6 +206,7 @@ pub fn elements(
         renderer,
         state.active_workspace,
         crate::appearance::render::SceneLayers::All,
+        state.config.output_scale,
     );
     state.appearance_renderer = effects;
     result.extend(scene?.into_iter().map(OverviewRenderElement::Scene));

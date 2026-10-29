@@ -559,6 +559,7 @@ fn render_with(
                 renderer,
                 state.active_workspace,
                 crate::appearance::render::SceneLayers::None,
+                state.config.output_scale,
             );
             state.appearance_renderer = effects;
             let mut elements: Vec<_> = cursors
