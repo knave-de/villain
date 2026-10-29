@@ -600,9 +600,12 @@ impl EffectsRenderer {
             p.workspace == workspace && p.geometry.size == geometry.size && p.sources == sources
         }) {
             let cached = self.panes.remove(index).expect("pane cache index");
+            let location = geometry
+                .loc
+                .to_physical_precise_round(state.config.output_scale);
             let element = EffectElement::Texture(texture_element(
                 &cached.texture,
-                (geometry.loc.x, geometry.loc.y),
+                (location.x, location.y),
                 1.0,
             ));
             self.panes.push_back(cached);
@@ -653,11 +656,11 @@ impl EffectsRenderer {
         );
         let texture = render_texture(renderer, geometry.size, &[element], [0.0; 4])?;
         let texture = TextureBuffer::from_texture(renderer, texture, 1, Transform::Normal, None);
-        let element = EffectElement::Texture(texture_element(
-            &texture,
-            (geometry.loc.x, geometry.loc.y),
-            1.0,
-        ));
+        let location = geometry
+            .loc
+            .to_physical_precise_round(state.config.output_scale);
+        let element =
+            EffectElement::Texture(texture_element(&texture, (location.x, location.y), 1.0));
         self.panes.push_back(CachedPane {
             workspace,
             geometry,

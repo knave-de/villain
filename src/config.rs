@@ -29,6 +29,8 @@ impl Default for InputConfig {
 
 #[derive(Clone, Debug)]
 pub struct RuntimeConfig {
+    /// Output scale normalized to Wayland's 1/120 fractional-scale units.
+    pub output_scale: f64,
     pub master_percent: u8,
     pub focus_cycle_order: knave_config::FocusCycleOrder,
     pub workspace: knave_config::CompositorWorkspaceConfig,
@@ -75,6 +77,7 @@ impl RuntimeConfig {
         let document =
             ConfigDocument::load(&path).map_err(|error| ConfigError(error.to_string()))?;
         let compositor = &document.config().compositor;
+        let output_scale = (compositor.scale * 120.0).round() / 120.0;
         let bindings: Vec<BindSpec> = compositor
             .bind
             .iter()
@@ -110,6 +113,7 @@ impl RuntimeConfig {
         }
 
         Ok(Self {
+            output_scale,
             master_percent: compositor.master_percent,
             focus_cycle_order: compositor.focus_cycle_order,
             workspace: compositor.workspace,
@@ -307,6 +311,23 @@ mod tests {
         fs::write(&path, "[compositor]\nmodkey = \"Invalid\"\n").unwrap();
         assert!(current.reload().is_err());
         assert!(!current.input.tap_to_click);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn output_scale_is_projected_as_wayland_fractional_units() {
+        let directory =
+            std::env::temp_dir().join(format!("villain-output-scale-{}", std::process::id()));
+        fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("config.toml");
+        fs::write(&path, "[compositor]\nscale = 1.5\n").unwrap();
+
+        let config = RuntimeConfig::load_from(path.clone()).unwrap();
+        assert_eq!(config.output_scale, 1.5);
+        fs::write(&path, "[compositor]\nscale = 1.333\n").unwrap();
+        let config = RuntimeConfig::load_from(path).unwrap();
+        assert_eq!(config.output_scale, 160.0 / 120.0);
+
         fs::remove_dir_all(directory).unwrap();
     }
     #[test]

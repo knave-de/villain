@@ -19,7 +19,7 @@ use smithay::{
         udev::{all_gpus, primary_gpu},
     },
     input::pointer::{AxisFrame, ButtonEvent},
-    output::{Mode, Output, PhysicalProperties, Subpixel},
+    output::{Mode, Output, PhysicalProperties, Scale, Subpixel},
     reexports::{
         calloop::EventLoop,
         drm::control::{Device, ModeTypeFlags, connector},
@@ -43,6 +43,18 @@ pub struct Tty {
     pending: bool,
     pub session: LibSeatSession,
     input_devices: Vec<smithay::reexports::input::Device>,
+}
+
+impl Tty {
+    pub(crate) fn set_scale(
+        &mut self,
+        scale: f64,
+    ) -> Option<smithay::utils::Size<i32, smithay::utils::Logical>> {
+        let mode = self.output.current_mode()?;
+        self.output
+            .change_current_state(None, None, Some(Scale::Fractional(scale)), None);
+        Some(crate::render::output_logical_size(mode.size, scale))
+    }
 }
 
 pub fn init(
@@ -133,6 +145,7 @@ pub fn init(
         formats,
     )?;
     let size = (i32::from(mode.size().0), i32::from(mode.size().1));
+    let output_scale = state.config.output_scale;
     let output = Output::new(
         format!("{:?}-{}", connector.interface(), connector.interface_id()),
         PhysicalProperties {
@@ -150,12 +163,16 @@ pub fn init(
     output.change_current_state(
         Some(wl_mode),
         Some(Transform::Normal),
-        None,
+        Some(Scale::Fractional(output_scale)),
         Some((0, 0).into()),
     );
     output.set_preferred(wl_mode);
-    state.output_size = size.into();
-    state.pointer_location = (f64::from(size.0) / 2.0, f64::from(size.1) / 2.0).into();
+    state.output_size = crate::render::output_logical_size(size.into(), output_scale);
+    state.pointer_location = (
+        f64::from(state.output_size.w) / 2.0,
+        f64::from(state.output_size.h) / 2.0,
+    )
+        .into();
     state.space.map_output(&output, (0, 0));
     let damage = OutputDamageTracker::from_output(&output);
     state.tty = Some(Tty {
@@ -278,10 +295,12 @@ impl Tty {
         let (mut buffer, age) = self.surface.next_buffer()?;
         let mut framebuffer = self.renderer.bind(&mut buffer)?;
         let now = state.start_time.elapsed();
-        let cursor_elements =
-            state
-                .cursor
-                .render_elements(&mut self.renderer, state.pointer_location, now);
+        let cursor_elements = state.cursor.render_elements(
+            &mut self.renderer,
+            state.pointer_location,
+            now,
+            state.config.output_scale,
+        );
         let elements =
             crate::overview_render::elements(state, &mut self.renderer, cursor_elements)?;
         let elements = state
@@ -347,7 +366,9 @@ fn process_input(event: InputEvent<LibinputInputBackend>, state: &mut Villain) {
         }
         InputEvent::Keyboard { event } => crate::keybinds::handle_keyboard_event(state, event),
         InputEvent::PointerMotion { event } => {
-            state.pointer_location += event.delta();
+            let delta = event.delta();
+            state.pointer_location.x += delta.x / state.config.output_scale;
+            state.pointer_location.y += delta.y / state.config.output_scale;
             state.pointer_location.x = state
                 .pointer_location
                 .x
@@ -431,8 +452,8 @@ fn process_input(event: InputEvent<LibinputInputBackend>, state: &mut Villain) {
             use smithay::backend::input::{Device, GestureSwipeUpdateEvent};
             state.swipe_update(
                 &event.device().id(),
-                event.delta_x(),
-                event.delta_y(),
+                event.delta_x() / state.config.output_scale,
+                event.delta_y() / state.config.output_scale,
                 event.time_msec(),
             );
         }

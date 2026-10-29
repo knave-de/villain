@@ -23,9 +23,15 @@ request a repaint. Pane composition uses no capture readback or PNG encoding.
 
 Knave, Villain, and Shell use the same visibility and pane message shapes.
 Update the three packages together.
-The selected hardware output currently has scale 1. Live nested and direct-TTY
-rendering, damage, input, frame pacing, CPU, memory, and wakeups need measurements
-on the target session before performance is considered verified.
+The global `[compositor] scale` setting controls output scale from 1.0 through
+4.0 and applies on `knavectl reload`. Villain advertises the ceiling integer via
+`wl_output.scale` for older clients and the configured 1/120th scale through
+`wp_fractional_scale_v1`; it also exposes `wp_viewporter`. Shell renders
+fractional buffers at their preferred scale with a logical viewport, retaining
+integer buffer scaling when either protocol is unavailable. Per-output settings
+are not supported. Live nested and direct-TTY rendering, damage, input, frame
+pacing, CPU, memory, and wakeups still need measurements on the target session
+before performance is considered verified.
 
 Overview panes and PNG previews include only the background-layer surface named
 `knave-shell-wallpaper`, beneath workspace windows. Other shell layers remain

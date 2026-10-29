@@ -100,6 +100,7 @@ impl CursorState {
         renderer: &mut GlesRenderer,
         location: Point<f64, smithay::utils::Logical>,
         now: Duration,
+        output_scale: f64,
     ) -> Vec<CursorRenderElement> {
         match self.effective_image() {
             CursorImageStatus::Hidden => Vec::new(),
@@ -114,8 +115,8 @@ impl CursorState {
                 render_elements_from_surface_tree(
                     renderer,
                     &surface,
-                    (location.to_i32_round() - hotspot).to_physical(1),
-                    1.0,
+                    (location.to_i32_round() - hotspot).to_physical_precise_round(output_scale),
+                    output_scale,
                     1.0,
                     Kind::Cursor,
                 )
@@ -128,10 +129,12 @@ impl CursorState {
                 }
                 let frames = self.named.get(&icon).unwrap();
                 let frame = frame_at(frames, elapsed).unwrap_or(&self.fallback);
-                let render_location = location.to_i32_round() - frame.hotspot;
+                let render_location: Point<i32, smithay::utils::Physical> =
+                    (location.to_i32_round() - frame.hotspot)
+                        .to_physical_precise_round(output_scale);
                 match MemoryRenderBufferRenderElement::from_buffer(
                     renderer,
-                    render_location.to_physical(1).to_f64(),
+                    render_location.to_f64(),
                     &frame.buffer,
                     None,
                     None,

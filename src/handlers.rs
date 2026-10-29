@@ -14,6 +14,7 @@ use smithay::{
             SurfaceAttributes, add_blocker, add_pre_commit_hook, with_states,
         },
         dmabuf::get_dmabuf,
+        fractional_scale::{FractionalScaleHandler, with_fractional_scale},
         output::OutputHandler,
         shell::xdg::{
             PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
@@ -169,6 +170,21 @@ impl CompositorHandler for Villain {
             // but it must not override focus chosen by a dispatcher.
             self.refresh_pointer_surface(0);
         }
+    }
+
+    fn destroyed(&mut self, surface: &WlSurface) {
+        self.fractional_scale_surfaces
+            .retain(|weak| weak.id() != surface.id());
+    }
+}
+
+impl FractionalScaleHandler for Villain {
+    fn new_fractional_scale(&mut self, surface: WlSurface) {
+        let scale = self.config.output_scale;
+        with_states(&surface, |states| {
+            with_fractional_scale(states, |fractional| fractional.set_preferred_scale(scale));
+        });
+        self.fractional_scale_surfaces.push(surface.downgrade());
     }
 }
 
@@ -459,6 +475,8 @@ smithay::delegate_data_device!(Villain);
 smithay::delegate_data_control!(Villain);
 smithay::delegate_ext_data_control!(Villain);
 smithay::delegate_output!(Villain);
+smithay::delegate_fractional_scale!(Villain);
+smithay::delegate_viewporter!(Villain);
 smithay::delegate_primary_selection!(Villain);
 smithay::delegate_seat!(Villain);
 smithay::delegate_pointer_gestures!(Villain);

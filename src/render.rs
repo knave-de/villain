@@ -10,9 +10,9 @@ use smithay::{
         winit::{self, WinitEvent},
     },
     input::pointer::{AxisFrame, ButtonEvent},
-    output::{Mode, Output, PhysicalProperties, Subpixel},
+    output::{Mode, Output, PhysicalProperties, Scale, Subpixel},
     reexports::calloop::EventLoop,
-    utils::Transform,
+    utils::{Logical, Physical, Size, Transform},
 };
 
 use crate::state::Villain;
@@ -35,6 +35,30 @@ impl Winit {
     pub(crate) fn renderer(&mut self) -> &mut GlesRenderer {
         self.backend.renderer()
     }
+
+    pub(crate) fn set_scale(
+        &mut self,
+        scale: f64,
+    ) -> smithay::utils::Size<i32, smithay::utils::Logical> {
+        self.output
+            .change_current_state(None, None, Some(Scale::Fractional(scale)), None);
+        output_logical_size(self.backend.window_size(), scale)
+    }
+}
+
+/// Convert a physical output extent to the compositor's integer logical grid.
+/// Scale may be fractional even though Smithay's typed geometry Scale is integer.
+pub(crate) fn output_logical_size(size: Size<i32, Physical>, scale: f64) -> Size<i32, Logical> {
+    let scale = if scale.is_finite() && scale > 0.0 {
+        scale
+    } else {
+        1.0
+    };
+    (
+        (f64::from(size.w) / scale).round() as i32,
+        (f64::from(size.h) / scale).round() as i32,
+    )
+        .into()
 }
 
 /// Start a nested output and connect its events to the compositor loop.
@@ -43,10 +67,11 @@ pub fn init_winit(
     state: &mut Villain,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let (backend, winit_source) = winit::init()?;
+    let output_scale = state.config.output_scale;
     // Villain renders the cursor into its nested output. Winit only supplies
     // host pointer events and hides the host cursor while it is over this window.
     backend.window().set_cursor_visible(false);
-    state.output_size = backend.window_size().to_logical(1);
+    state.output_size = output_logical_size(backend.window_size(), output_scale);
     let mode = Mode {
         size: backend.window_size(),
         refresh: 60_000,
@@ -65,7 +90,7 @@ pub fn init_winit(
     output.change_current_state(
         Some(mode),
         Some(Transform::Flipped180),
-        None,
+        Some(Scale::Fractional(output_scale)),
         Some((0, 0).into()),
     );
     output.set_preferred(mode);
@@ -84,7 +109,7 @@ pub fn init_winit(
             WinitEvent::Resized { size, .. } => {
                 state.cancel_swipe(0);
                 state.cancel_workspace_motion();
-                state.output_size = size.to_logical(1);
+                state.output_size = output_logical_size(size, state.config.output_scale);
                 state.overview_panes.clear();
                 state.winit.as_ref().unwrap().output.change_current_state(
                     Some(Mode {
@@ -102,7 +127,11 @@ pub fn init_winit(
                 crate::keybinds::handle_keyboard_event(state, event);
             }
             WinitEvent::Input(InputEvent::PointerMotionAbsolute { event }) => {
-                state.pointer_location = (event.x(), event.y()).into();
+                state.pointer_location = (
+                    event.x() / state.config.output_scale,
+                    event.y() / state.config.output_scale,
+                )
+                    .into();
                 if crate::screenshot::pointer_motion(state) {
                     return;
                 }
@@ -217,9 +246,12 @@ fn render_frame(state: &mut Villain) {
         let age = winit.backend.buffer_age().unwrap_or(0);
         let (renderer, mut framebuffer) = winit.backend.bind()?;
         let now = state.start_time.elapsed();
-        let cursor_elements = state
-            .cursor
-            .render_elements(renderer, state.pointer_location, now);
+        let cursor_elements = state.cursor.render_elements(
+            renderer,
+            state.pointer_location,
+            now,
+            state.config.output_scale,
+        );
         let elements = crate::overview_render::elements(state, renderer, cursor_elements)?;
         let elements = state
             .night_light

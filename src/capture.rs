@@ -539,9 +539,12 @@ fn render_with(
         .map_err(|e| e.to_string())?;
     let mut framebuffer = renderer.bind(&mut target).map_err(|e| e.to_string())?;
     let cursors = if cursor {
-        state
-            .cursor
-            .render_elements(renderer, state.pointer_location, state.start_time.elapsed())
+        state.cursor.render_elements(
+            renderer,
+            state.pointer_location,
+            state.start_time.elapsed(),
+            state.config.output_scale,
+        )
     } else {
         Vec::new()
     };

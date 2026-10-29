@@ -3,6 +3,8 @@
 [compositor]
 
 modkey = "Alt"
+# Logical-to-buffer output scale, rounded by Wayland to 1/120ths (1..4).
+scale = 1.0
 # Initial master width in percent; stack receives the remainder (10..90).
 master_percent = 50
 # Order focus-switching shortcuts cycle a workspace's windows in:
