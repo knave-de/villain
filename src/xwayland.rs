@@ -2,6 +2,7 @@
 
 use std::{os::fd::OwnedFd, process::Stdio};
 
+use knave_desktop_api::XWaylandStatus;
 use smithay::{
     desktop::Window,
     reexports::calloop::EventLoop,
@@ -77,6 +78,7 @@ pub fn init(event_loop: &mut EventLoop<'static, Villain>, state: &mut Villain) {
         Stdio::null(),
         |_| (),
     ) else {
+        state.xwayland_status = XWaylandStatus::Unavailable;
         tracing::warn!("XWayland is unavailable; continuing as a Wayland-only compositor");
         return;
     };
@@ -91,6 +93,9 @@ pub fn init(event_loop: &mut EventLoop<'static, Villain>, state: &mut Villain) {
             Ok(xwm) => {
                 state.xwm = Some(xwm);
                 state.xwayland_display = Some(display_number);
+                state.xwayland_status = XWaylandStatus::Available {
+                    display: format!(":{display_number}"),
+                };
                 state
                     .config
                     .environment
@@ -100,12 +105,17 @@ pub fn init(event_loop: &mut EventLoop<'static, Villain>, state: &mut Villain) {
                 }
                 tracing::info!(display = %format_args!(":{display_number}"), "XWayland is ready");
             }
-            Err(error) => tracing::error!(%error, "could not start the XWayland window manager"),
+            Err(error) => {
+                state.xwayland_status = XWaylandStatus::Unavailable;
+                tracing::error!(%error, "could not start the XWayland window manager");
+            }
         },
         XWaylandEvent::Error => {
+            state.xwayland_status = XWaylandStatus::Unavailable;
             tracing::error!("XWayland exited before it became ready");
         }
     }) {
+        state.xwayland_status = XWaylandStatus::Unavailable;
         tracing::error!(%error, "could not register XWayland with the event loop");
     }
 }

@@ -44,6 +44,7 @@ use crate::config::RuntimeConfig;
 use crate::cursor::CursorState;
 use crate::dispatch::Dispatch;
 use crate::workspaces::Workspace;
+use knave_desktop_api::XWaylandStatus;
 
 /// All mutable compositor state lives here.
 ///
@@ -89,6 +90,7 @@ pub struct Villain {
     pub xwayland_shell_state: XWaylandShellState,
     pub xwm: Option<X11Wm>,
     pub xwayland_display: Option<u32>,
+    pub xwayland_status: XWaylandStatus,
     pub owns_session: bool,
     pub(crate) activation: crate::session::ActivationWorker,
     pub shm_state: ShmState,
@@ -221,6 +223,7 @@ impl Villain {
             xwayland_shell_state: XWaylandShellState::new::<Self>(&display_handle),
             xwm: None,
             xwayland_display: None,
+            xwayland_status: XWaylandStatus::Starting,
             owns_session: false,
             activation: crate::session::ActivationWorker::new(),
             shm_state: ShmState::new::<Self>(
