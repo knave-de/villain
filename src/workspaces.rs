@@ -1132,16 +1132,24 @@ impl Villain {
         let Some(index) = self.workspace_for_window(window) else {
             return;
         };
-        let Some(entry) = self.workspaces[index]
+        let Some(position) = self.workspaces[index]
             .windows
-            .iter_mut()
-            .find(|entry| entry.window == *window)
+            .iter()
+            .position(|entry| entry.window == *window)
         else {
             return;
         };
-        if !std::mem::take(&mut entry.initial_focus_pending) || index != self.active_workspace {
+        if !self.workspaces[index].windows[position].initial_focus_pending {
             return;
         }
+        if index != self.active_workspace {
+            if !self.config.switch_to_new_window_workspace {
+                self.workspaces[index].windows[position].initial_focus_pending = false;
+                return;
+            }
+            self.switch_workspace(index);
+        }
+        self.workspaces[index].windows[position].initial_focus_pending = false;
         let workspace = &self.workspaces[index];
         let entry = workspace
             .windows
