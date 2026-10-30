@@ -2,6 +2,7 @@
 
 use smithay::{
     backend::renderer::utils::on_commit_buffer_handler,
+    desktop::{PopupKind, find_popup_root_surface, get_popup_toplevel_coords},
     reexports::calloop::Interest,
     reexports::wayland_server::{
         Client, Resource,
@@ -303,6 +304,47 @@ smithay::delegate_keyboard_shortcuts_inhibit!(Villain);
 
 impl OutputHandler for Villain {}
 
+impl Villain {
+    fn constrained_popup_geometry(
+        &self,
+        surface: &PopupSurface,
+        positioner: PositionerState,
+    ) -> smithay::utils::Rectangle<i32, smithay::utils::Logical> {
+        let popup = PopupKind::Xdg(surface.clone());
+        let Ok(root) = find_popup_root_surface(&popup) else {
+            return positioner.get_geometry();
+        };
+        let Some(window) = self.window_for_surface(&root) else {
+            return positioner.get_geometry();
+        };
+        let Some(root_geometry) = self.space.element_geometry(&window) else {
+            return positioner.get_geometry();
+        };
+
+        // Positioner coordinates are relative to the immediate parent surface,
+        // including any popup ancestors. Convert the output bounds to that space.
+        let parent_origin = root_geometry.loc + get_popup_toplevel_coords(&popup);
+        let anchor = positioner.anchor_rect;
+        let anchor_center = (
+            (parent_origin.x + anchor.loc.x + anchor.size.w / 2) as f64,
+            (parent_origin.y + anchor.loc.y + anchor.size.h / 2) as f64,
+        );
+        let output = self
+            .space
+            .output_under(anchor_center)
+            .next()
+            .or_else(|| self.space.outputs().next());
+        let Some(output_bounds) = output.and_then(|output| self.space.output_geometry(output))
+        else {
+            return positioner.get_geometry();
+        };
+        let target =
+            smithay::utils::Rectangle::new(output_bounds.loc - parent_origin, output_bounds.size);
+
+        positioner.get_unconstrained_geometry(target)
+    }
+}
+
 impl XdgShellHandler for Villain {
     fn xdg_shell_state(&mut self) -> &mut XdgShellState {
         &mut self.xdg_shell_state
@@ -390,8 +432,9 @@ impl XdgShellHandler for Villain {
     }
 
     fn new_popup(&mut self, surface: PopupSurface, positioner: PositionerState) {
+        let geometry = self.constrained_popup_geometry(&surface, positioner);
         surface.with_pending_state(|state| {
-            state.geometry = positioner.get_geometry();
+            state.geometry = geometry;
             state.positioner = positioner;
         });
         let _ = self.popups.track_popup(surface.into());
@@ -403,8 +446,9 @@ impl XdgShellHandler for Villain {
         positioner: PositionerState,
         token: u32,
     ) {
+        let geometry = self.constrained_popup_geometry(&surface, positioner);
         surface.with_pending_state(|state| {
-            state.geometry = positioner.get_geometry();
+            state.geometry = geometry;
             state.positioner = positioner;
         });
         surface.send_repositioned(token);
