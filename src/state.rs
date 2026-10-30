@@ -71,6 +71,7 @@ pub struct Villain {
     pub(crate) ipc_server: crate::ipc::IpcServer,
     pub(crate) desktop_state_dirty: bool,
     pub config: RuntimeConfig,
+    pub(crate) global_keybinds: crate::keybinds::KeybindRegistry,
 
     /// The desktop plane: windows are mapped here and later rendered here.
     pub space: Space<Window>,
@@ -128,6 +129,8 @@ pub struct Villain {
     pub children: Vec<(usize, std::process::Child)>,
     pub suppressed_keys: std::collections::HashSet<smithay::input::keyboard::Keycode>,
     pub pending_modifier: Option<(smithay::backend::input::Keycode, Dispatch)>,
+    pub active_global_shortcuts:
+        std::collections::HashMap<smithay::input::keyboard::Keycode, (String, String, String)>,
     pub host_focused: bool,
     pub split_drag_active: bool,
     pub(crate) interaction: Option<crate::window_grab::Interaction>,
@@ -196,6 +199,7 @@ impl Villain {
             ipc_server,
             desktop_state_dirty: true,
             config,
+            global_keybinds: crate::keybinds::KeybindRegistry::empty(),
             space: Space::default(),
             compositor_state: CompositorState::new::<Self>(&display_handle),
             layer_shell_state: smithay::wayland::shell::wlr_layer::WlrLayerShellState::new::<Self>(
@@ -261,6 +265,7 @@ impl Villain {
             children: Vec::new(),
             suppressed_keys: Default::default(),
             pending_modifier: None,
+            active_global_shortcuts: Default::default(),
             host_focused: true,
             split_drag_active: false,
             interaction: None,
