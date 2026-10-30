@@ -1056,7 +1056,49 @@ impl Villain {
             .unwrap_or(index);
         if target != index {
             let entry = self.workspaces[index].windows.remove(position);
-            self.workspaces[target].windows.push(entry);
+            let window_id = entry.id;
+            let moved_window = entry.window.clone();
+            let focus_history = self.workspaces[index]
+                .focus_history
+                .extract_if(.., |id| *id == window_id)
+                .collect::<Vec<_>>();
+            let minimized_history = self.workspaces[index]
+                .minimized_history
+                .extract_if(.., |candidate| candidate == &moved_window)
+                .collect::<Vec<_>>();
+            let fullscreen = self.workspaces[index]
+                .fullscreen
+                .filter(|owner| *owner == window_id);
+            let maximized = self.workspaces[index]
+                .maximized
+                .filter(|owner| *owner == window_id);
+            if fullscreen.is_some() {
+                self.workspaces[index].fullscreen = None;
+            }
+            if maximized.is_some() {
+                self.workspaces[index].maximized = None;
+            }
+            Self::set_activated(&moved_window, false);
+            for unmanaged in &mut self.unmanaged_x11_windows {
+                if unmanaged
+                    .parent
+                    .as_ref()
+                    .is_some_and(|parent| *parent == moved_window)
+                {
+                    unmanaged.workspace = target;
+                }
+            }
+            let destination = &mut self.workspaces[target];
+            destination.windows.push(entry);
+            destination.focus_history.extend(focus_history);
+            destination.minimized_history.extend(minimized_history);
+            if fullscreen.is_some() {
+                destination.fullscreen = fullscreen;
+            }
+            if maximized.is_some() {
+                destination.maximized = maximized;
+            }
+            self.configure_workspace(target);
             if index == self.active_workspace || target == self.active_workspace {
                 self.relayout_active_workspace();
             }
