@@ -118,6 +118,9 @@ impl Villain {
             .max(self.active_workspace.saturating_add(2))
             .max(highest_used.map_or(0, |index| index.saturating_add(2)))
             .min(MAX_WORKSPACES);
+        if retained != self.workspaces.len() {
+            self.desktop_state_dirty = true;
+        }
         if retained < self.workspaces.len() {
             self.workspaces.truncate(retained);
             if self.last_workspace.is_some_and(|index| index >= retained) {
