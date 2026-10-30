@@ -153,8 +153,10 @@ under inhibitors so a client can never lock the user out of the session.
 ## Move to workspace
 
 `MOD+Shift+1` through `MOD+Shift+9` send the focused window to that
-workspace; `MOD+Shift+0` sends it to workspace 10. You stay on the current
-workspace and focus returns to the most recently focused visible window.
+workspace; `MOD+Shift+0` sends it to workspace 10. Additional workspaces can
+be selected with a custom `workspace` binding or by advancing from the dynamic
+tail. You stay on the current workspace and focus returns to the most recently
+focused visible window.
 Selecting the current workspace does nothing. Parent windows and their dialogs
 move together, retaining floating, minimized, maximized and fullscreen state.
 Custom bindings use `dispatch = "move-to-workspace"` with `args = ["2"]`.
@@ -335,16 +337,17 @@ compatibility; multiple-monitor selection remains out of scope.
 
 Keyboard, bar and control-command workspace switches slide windows and wallpaper
 for 160 ms; focus and workspace state change immediately. Next/previous keep their
-direction through wrapping and skipped empty slots. Repeated switches retarget
-from current positions. Panels and the cursor remain stationary. Pointer clicks
+direction through skipped empty slots and dynamic workspace creation. Repeated
+switches retarget from current positions. Panels and the cursor remain stationary. Pointer clicks
 and scrolling finish the transition before delivery. See the
 [motion design](docs/architecture/workspace-motion.md) for ownership and interruptions.
 
 ## Workspace swipes
 
 Three-finger horizontal touchpad swipes move workspace scenes with your fingers.
-Left advances, right goes back, wrapping at the ends. Release beyond a quarter
-of the output width commits; shorter or cancelled swipes settle back.
+Left advances and creates a workspace at the dynamic tail when needed; right
+goes back and stops at the first workspace. Release beyond a quarter of the
+output width commits; shorter or cancelled swipes settle back.
 Panels and the cursor stay stationary. See the
 [Knave gesture contract](https://github.com/knave-de/knave/blob/master/docs/architecture/decisions/0010-workspace-swipes.md).
 Override entries under `[[compositor.gesture.bind]]` by fingers and direction;
@@ -353,8 +356,14 @@ actions, not knavectl commands. Reload applies validated changes atomically.
 
 To skip empty slots when cycling with next/previous shortcuts or swipes, set
 `skip_empty = true` under `[compositor.workspace]` and reload. It defaults to
-false; direct number/bar selection still reaches empty slots. Minimized windows
-count as occupancy. Closing the last window leaves you on the current workspace.
+false; number shortcuts and bar clicks reach predefined slots and the existing
+dynamic tail, while next/previous navigation grows the tail. Minimized windows
+count as occupied. The default keeps one predefined workspace and one dynamic
+workspace. Set `predefined` to a larger positive number to keep a contiguous
+prefix permanently; the compositor retains all workspaces through the highest
+occupied slot and one empty workspace after it. Empty slots are removed only
+from the end, never between retained workspaces. With `skip_empty = true`,
+forward navigation uses the next blank slot if no occupied workspace lies ahead.
 
 Night Light uses Knave Session's validated desktop command to apply a color
 transform to the complete physical/nested output. It includes shell layers and

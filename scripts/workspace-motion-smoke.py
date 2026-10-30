@@ -143,20 +143,23 @@ def main():
         if not args.baseline:
             check(len(third['motion']) == 3 and third['active_workspace'] == 3, 'rapid third target preserves outgoing tracks')
         settle(3)
-        select(10)
-        settle(10)
+        for workspace in range(4, 11):
+            select(workspace)
+            settle(workspace)
         call('key', 'Super_L+Right')
-        wrapped = query()
+        advanced = query()
         if not args.baseline:
-            check(next(p['x'] for p in wrapped['motion'] if p['workspace'] == 1) > 0, 'forward wrap preserves travel direction')
-        settle(1)
+            check(next(p['x'] for p in advanced['motion'] if p['workspace'] == 11) > 0, 'forward navigation creates workspace eleven')
+        settle(11)
         call('key', 'Super_L+Left')
-        wrapped = query()
+        returned = query()
         if not args.baseline:
-            check(next(p['x'] for p in wrapped['motion'] if p['workspace'] == 10) < 0, 'backward wrap preserves travel direction')
+            check(next(p['x'] for p in returned['motion'] if p['workspace'] == 10) < 0, 'backward navigation returns to workspace ten')
         settle(10)
         select(1)
         settle(1)
+        call('key', 'Super_L+Left')
+        check(query()['active_workspace'] == 1 and not query().get('motion_timer', False), 'backward navigation stops at workspace one')
 
         # Click the actual bar's workspace chip, then interrupt with a window click.
         call('click', '192', '18', '1')

@@ -149,6 +149,7 @@ impl Villain {
                 self.release_pointer_buttons();
                 self.appearance_renderer.clear();
                 self.config = config;
+                self.trim_dynamic_workspaces();
                 if output_scale_changed {
                     self.apply_output_scale(self.config.output_scale);
                 } else {
@@ -197,14 +198,20 @@ impl Villain {
                 .then_some(())
                 .ok_or(DispatchError::NoMinimizedWindow),
             Dispatch::FocusWorkspace(workspace) => {
-                if !(1..=self.workspaces.len()).contains(&workspace) {
+                if workspace == 0 || workspace > crate::workspace_navigation::MAX_WORKSPACES {
                     return Err(DispatchError::InvalidWorkspace(workspace));
                 }
-                self.switch_workspace(workspace - 1);
+                let index = workspace - 1;
+                // Number shortcuts may select fixed slots or the already
+                // materialized dynamic tail, but must not skip ahead and
+                // manufacture several empty workspaces at once.
+                if index < self.workspaces.len() {
+                    self.switch_workspace(index);
+                }
                 Ok(())
             }
             Dispatch::MoveFocusedToWorkspace(workspace) => {
-                if !(1..=self.workspaces.len()).contains(&workspace) {
+                if workspace == 0 || workspace > crate::workspace_navigation::MAX_WORKSPACES {
                     return Err(DispatchError::InvalidWorkspace(workspace));
                 }
                 self.move_focused_to_workspace(workspace - 1)

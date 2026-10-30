@@ -83,6 +83,7 @@ pub(crate) struct Transition {
     pub target: usize,
     pub direction: Direction,
     pub offset: f64,
+    target_was_occupied: bool,
     settle: Option<Tween>,
 }
 #[derive(Default)]
@@ -119,6 +120,7 @@ impl Villain {
         self.gestures.transition_device = None;
         if self.gestures.transition.take().is_some() {
             self.request_repaint();
+            self.trim_dynamic_workspaces();
         }
         self.retire_motion_timer();
     }
@@ -150,10 +152,9 @@ impl Villain {
         }
         let target_disappeared = self.config.workspace.skip_empty
             && self.gestures.reserved()
-            && self
-                .gestures
-                .transition
-                .is_some_and(|transition| !self.workspace_occupied(transition.target));
+            && self.gestures.transition.is_some_and(|transition| {
+                transition.target_was_occupied && !self.workspace_occupied(transition.target)
+            });
         if target_disappeared
             || ((self.gestures.reserved()
                 || self.gestures.transition.is_some()
@@ -256,12 +257,24 @@ impl Villain {
                         self.stop_swipe_visual();
                         return;
                     };
+                    if !self.ensure_workspace_exists(target) {
+                        self.stop_swipe_visual();
+                        return;
+                    }
                     self.gestures.transition_device = Some(device.into());
                     self.gestures.transition = Some(Transition {
                         source,
                         target,
                         direction,
                         offset,
+                        target_was_occupied: previous
+                            .filter(|preview| {
+                                preview.source == source && preview.direction == direction
+                            })
+                            .map_or_else(
+                                || self.workspace_occupied(target),
+                                |preview| preview.target_was_occupied,
+                            ),
                         settle: None,
                     });
                     self.request_repaint();
@@ -309,6 +322,7 @@ impl Villain {
                     Some(Tween::new(transition.offset, end, Instant::now(), SETTLE));
                 self.gestures.transition_device = Some(stream.device);
                 self.gestures.transition = Some(transition);
+                self.trim_dynamic_workspaces();
                 self.request_repaint();
                 self.schedule_motion_tick();
             }
@@ -327,6 +341,7 @@ impl Villain {
         if sample.finished {
             self.gestures.transition = None;
             self.gestures.transition_device = None;
+            self.trim_dynamic_workspaces();
         }
         true
     }

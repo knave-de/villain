@@ -472,6 +472,9 @@ impl Villain {
         };
         changed |= entry.floating != geometry;
         entry.floating = geometry;
+        if moved_from.is_some() {
+            self.trim_dynamic_workspaces();
+        }
         if changed {
             self.desktop_state_dirty = true;
             if index == self.active_workspace || moved_from == Some(self.active_workspace) {
@@ -962,6 +965,7 @@ impl Villain {
             floating_override: None,
             saved_floating: None,
         });
+        self.trim_dynamic_workspaces();
         self.refresh_window_hints(&window);
         tracing::info!(window = id.0, workspace = index + 1, "window opened");
         let index = self.workspace_for_window(&window).unwrap_or(index);
@@ -1043,6 +1047,9 @@ impl Villain {
         }
         self.cancel_swipe(0);
         self.cancel_workspace_motion();
+        if !self.ensure_workspace_exists(target) {
+            return false;
+        }
         self.release_pointer_buttons();
         let workspace = &self.workspaces[source];
         let mut root = self.window_id(&focused).unwrap();
@@ -1109,6 +1116,7 @@ impl Villain {
         if maximized.is_some() {
             destination.maximized = maximized;
         }
+        self.trim_dynamic_workspaces();
         self.configure_workspace(target);
         self.relayout_active_workspace();
         true
@@ -1128,7 +1136,7 @@ impl Villain {
         index: usize,
         direction: crate::workspace_navigation::Direction,
     ) {
-        if index >= self.workspaces.len() {
+        if !self.ensure_workspace_exists(index) {
             return;
         }
         let source = self.active_workspace;
@@ -1136,13 +1144,14 @@ impl Villain {
         if source != index {
             self.start_workspace_motion(source, index, direction);
         }
+        self.trim_dynamic_workspaces();
     }
 
     pub(crate) fn switch_workspace_immediate(&mut self, index: usize) {
-        if index >= self.workspaces.len() {
+        self.cancel_swipe(0);
+        if !self.ensure_workspace_exists(index) {
             return;
         }
-        self.cancel_swipe(0);
         self.remember_current_window_focus();
         if !self
             .pointer
@@ -2204,6 +2213,7 @@ impl Villain {
                 self.space.unmap_elem(&window);
                 self.unmanaged_x11_windows
                     .retain(|entry| entry.window != window);
+                self.trim_dynamic_workspaces();
                 self.refresh_unmanaged_x11_windows();
                 self.sync_x11_stacking();
                 self.refresh_pointer(0);
@@ -2239,6 +2249,7 @@ impl Villain {
                     .retain(|candidate| candidate != &window);
             }
         }
+        self.trim_dynamic_workspaces();
         self.relayout_active_workspace();
     }
 }
