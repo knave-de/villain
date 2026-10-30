@@ -983,7 +983,7 @@ dependencies = [
 [[package]]
 name = "knave-config"
 version = "0.1.0"
-source = "git+https://github.com/knave-de/knave.git?rev=f29cb071fe5bcb4da1de074721ea7f27606f5d0a#f29cb071fe5bcb4da1de074721ea7f27606f5d0a"
+source = "git+https://github.com/knave-de/knave.git?rev=a2271ac#a2271acf55971480af2ad841b1bbeb7063de8893"
 dependencies = [
  "regex",
  "serde",
