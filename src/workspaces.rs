@@ -46,6 +46,9 @@ struct WorkspaceWindow {
     floating: Option<Rectangle<i32, smithay::utils::Logical>>,
     stack_weight: u32,
     floating_override: Option<bool>,
+    stay_on_top: bool,
+    center_override: Option<bool>,
+    initial_rules_applied: bool,
     saved_floating: Option<Geometry>,
 }
 
@@ -163,8 +166,31 @@ pub(crate) fn constrain_geometry(
     rect
 }
 
+fn window_identity(window: &Window) -> Option<(String, String)> {
+    if let Some(surface) = window.toplevel() {
+        return Some(smithay::wayland::compositor::with_states(
+            surface.wl_surface(),
+            |states| {
+                let attributes = states
+                    .data_map
+                    .get::<smithay::wayland::shell::xdg::XdgToplevelSurfaceData>()
+                    .expect("XDG toplevel data")
+                    .lock()
+                    .unwrap();
+                (
+                    attributes.app_id.clone().unwrap_or_default(),
+                    attributes.title.clone().unwrap_or_default(),
+                )
+            },
+        ));
+    }
+    window
+        .x11_surface()
+        .map(|surface| (surface.class(), surface.title()))
+}
+
 impl Workspace {
-    fn stacking_path(&self, window: &Window) -> Vec<(u64, u64)> {
+    fn stacking_path(&self, window: &Window) -> Vec<(bool, u64, u64)> {
         let mut entry = self.windows.iter().find(|entry| entry.window == *window);
         let mut path = Vec::new();
         // Parent hints are client-controlled; bound traversal even for cycles.
@@ -172,7 +198,7 @@ impl Workspace {
             let Some(current) = entry.filter(|entry| entry.floating.is_some()) else {
                 break;
             };
-            path.push((current.stacking_order, current.id.0));
+            path.push((current.stay_on_top, current.stacking_order, current.id.0));
             entry = current
                 .parent
                 .and_then(|id| self.windows.iter().find(|e| e.id == id));
@@ -457,14 +483,16 @@ impl Villain {
                 };
                 let size =
                     constrain_geometry(Rectangle::from_size(size), self.output_size, min, max).size;
-                Rectangle::new(
+                let location = if entry.center_override == Some(false) {
+                    parent_rect.loc
+                } else {
                     (
                         parent_rect.loc.x + (parent_rect.size.w - size.w) / 2,
                         parent_rect.loc.y + (parent_rect.size.h - size.h) / 2,
                     )
-                        .into(),
-                    size,
-                )
+                        .into()
+                };
+                Rectangle::new(location, size)
             });
             Some(constrain_geometry(geometry, self.output_size, min, max))
         } else {
@@ -963,6 +991,9 @@ impl Villain {
             floating: None,
             stack_weight: 10000,
             floating_override: None,
+            stay_on_top: false,
+            center_override: None,
+            initial_rules_applied: false,
             saved_floating: None,
         });
         self.trim_dynamic_workspaces();
@@ -981,9 +1012,123 @@ impl Villain {
         }
     }
 
+    fn apply_window_rules_on_open(&mut self, window: &Window) {
+        let Some(index) = self.workspace_for_window(window) else {
+            return;
+        };
+        let Some((app_id, title)) = window_identity(window) else {
+            return;
+        };
+        let Some(position) = self.workspaces[index]
+            .windows
+            .iter()
+            .position(|entry| entry.window == *window)
+        else {
+            return;
+        };
+        if self.workspaces[index].windows[position].initial_rules_applied {
+            return;
+        }
+        self.workspaces[index].windows[position].initial_rules_applied = true;
+
+        let actions = self.config.window_rules.for_window(&app_id, &title);
+        {
+            let entry = &mut self.workspaces[index].windows[position];
+            if let Some(placement) = actions.placement {
+                entry.floating_override =
+                    Some(placement == knave_config::WindowPlacement::Floating);
+            }
+            if let Some(center) = actions.center {
+                entry.center_override = Some(center);
+                entry.floating = None;
+                if center {
+                    entry.floating_override = Some(true);
+                }
+            }
+            if let Some(stay_on_top) = actions.stay_on_top {
+                entry.stay_on_top = stay_on_top;
+            }
+        }
+
+        let target = actions
+            .workspace
+            .map(|workspace| usize::from(workspace - 1))
+            .unwrap_or(index);
+        if target != index {
+            let Some(successor) = target.checked_add(1) else {
+                return;
+            };
+            if !self.ensure_workspace_exists(successor) {
+                tracing::warn!(
+                    app_id,
+                    title,
+                    workspace = target + 1,
+                    "window rule target workspace could not be materialized"
+                );
+                return;
+            }
+            let entry = self.workspaces[index].windows.remove(position);
+            let window_id = entry.id;
+            let moved_window = entry.window.clone();
+            let focus_history = self.workspaces[index]
+                .focus_history
+                .extract_if(.., |id| *id == window_id)
+                .collect::<Vec<_>>();
+            let minimized_history = self.workspaces[index]
+                .minimized_history
+                .extract_if(.., |candidate| candidate == &moved_window)
+                .collect::<Vec<_>>();
+            let fullscreen = self.workspaces[index]
+                .fullscreen
+                .filter(|owner| *owner == window_id);
+            let maximized = self.workspaces[index]
+                .maximized
+                .filter(|owner| *owner == window_id);
+            if fullscreen.is_some() {
+                self.workspaces[index].fullscreen = None;
+            }
+            if maximized.is_some() {
+                self.workspaces[index].maximized = None;
+            }
+            Self::set_activated(&moved_window, false);
+            for unmanaged in &mut self.unmanaged_x11_windows {
+                if unmanaged
+                    .parent
+                    .as_ref()
+                    .is_some_and(|parent| *parent == moved_window)
+                {
+                    unmanaged.workspace = target;
+                }
+            }
+            let destination = &mut self.workspaces[target];
+            destination.windows.push(entry);
+            destination.focus_history.extend(focus_history);
+            destination.minimized_history.extend(minimized_history);
+            if fullscreen.is_some() {
+                destination.fullscreen = fullscreen;
+            }
+            if maximized.is_some() {
+                destination.maximized = maximized;
+            }
+            self.trim_dynamic_workspaces();
+            self.configure_workspace(target);
+            if index == self.active_workspace || target == self.active_workspace {
+                self.relayout_active_workspace();
+            }
+            tracing::info!(
+                app_id,
+                title,
+                workspace = target + 1,
+                "window rule selected workspace"
+            );
+        }
+        self.refresh_window_hints(window);
+    }
+
     /// Native parent hints are only complete at the first commit; X11 supplies
     /// them at map time. Later redraws must never repeat this activation policy.
     pub fn finish_new_window_focus(&mut self, window: &Window) {
+        self.apply_window_rules_on_open(window);
         let Some(index) = self.workspace_for_window(window) else {
             return;
         };

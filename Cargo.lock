@@ -2285,6 +2285,7 @@ dependencies = [
  "knave-desktop-api",
  "libc",
  "png",
+ "regex",
  "serde_json",
  "smithay",
  "toml",
