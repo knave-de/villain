@@ -455,6 +455,9 @@ impl Villain {
                             .expect("snapshot initialized"),
                     )
                 }
+                DesktopQuery::XWaylandStatus => {
+                    DesktopResponse::XWaylandStatus(self.xwayland_status.clone())
+                }
                 DesktopQuery::Windows => DesktopResponse::Windows(self.window_info()),
                 DesktopQuery::Workspaces => DesktopResponse::Workspaces(self.workspace_info()),
                 DesktopQuery::Devices => DesktopResponse::Devices(self.device_info()),
