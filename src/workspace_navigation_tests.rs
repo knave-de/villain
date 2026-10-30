@@ -231,7 +231,10 @@ fn last_workspace_tracks_successful_switches_and_toggles() {
     state.swipe_end("pad", false, 3);
     assert_eq!(state.active_workspace, 11);
     state.dispatch(Action::LastWorkspace).unwrap();
-    assert_eq!(state.active_workspace, 10, "committed swipes update history");
+    assert_eq!(
+        state.active_workspace, 10,
+        "committed swipes update history"
+    );
     state.swipe_begin("pad".into(), 3, 4);
     state.swipe_update("pad", -100.0, 0.0, 5);
     state.swipe_end("pad", true, 6);
