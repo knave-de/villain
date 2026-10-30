@@ -114,6 +114,7 @@ impl Villain {
             self.refresh_pointer_surface(0);
         }
         self.retire_motion_timer();
+        self.trim_dynamic_workspaces();
     }
     pub(crate) fn finish_workspace_motion(&mut self) {
         if self.timed_workspace_motion() {

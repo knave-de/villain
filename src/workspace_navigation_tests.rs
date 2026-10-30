@@ -194,6 +194,10 @@ fn last_workspace_tracks_successful_switches_and_toggles() {
     state.dispatch(Action::LastWorkspace).unwrap();
     assert_eq!(state.active_workspace, 0, "no history at startup");
     assert_eq!(state.last_workspace, None);
+    for _ in 0..6 {
+        state.dispatch(Action::NextWorkspace).unwrap();
+    }
+    assert_eq!(state.workspaces.len(), 8);
     state.dispatch(Action::FocusWorkspace(7)).unwrap();
     state.dispatch(Action::FocusWorkspace(7)).unwrap();
     state.switch_workspace(10);

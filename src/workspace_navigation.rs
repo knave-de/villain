@@ -115,11 +115,14 @@ impl Villain {
         let retained = fixed_count
             .saturating_add(1)
             .max(2)
-            .max(self.active_workspace.saturating_add(1))
+            .max(self.active_workspace.saturating_add(2))
             .max(highest_used.map_or(0, |index| index.saturating_add(2)))
             .min(MAX_WORKSPACES);
         if retained < self.workspaces.len() {
             self.workspaces.truncate(retained);
+            if self.last_workspace.is_some_and(|index| index >= retained) {
+                self.last_workspace = None;
+            }
         } else if retained > self.workspaces.len() {
             self.workspaces.resize_with(retained, Workspace::default);
         }

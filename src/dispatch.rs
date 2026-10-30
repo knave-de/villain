@@ -201,7 +201,13 @@ impl Villain {
                 if workspace == 0 || workspace > crate::workspace_navigation::MAX_WORKSPACES {
                     return Err(DispatchError::InvalidWorkspace(workspace));
                 }
-                self.switch_workspace(workspace - 1);
+                let index = workspace - 1;
+                // Number shortcuts may select fixed slots or the already
+                // materialized dynamic tail, but must not skip ahead and
+                // manufacture several empty workspaces at once.
+                if index < self.workspaces.len() {
+                    self.switch_workspace(index);
+                }
                 Ok(())
             }
             Dispatch::MoveFocusedToWorkspace(workspace) => {
