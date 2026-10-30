@@ -20,7 +20,7 @@ use smithay::{
         timer::{TimeoutAction, Timer},
     },
     utils::{Buffer, Logical, Physical, Point, Rectangle, Transform},
-    wayland::selection::data_device::set_data_device_selection,
+    wayland::selection::{SelectionTarget, data_device::set_data_device_selection},
 };
 
 use crate::{
@@ -330,6 +330,9 @@ fn finish(
                 vec![IMAGE_MIME.into()],
                 payload,
             );
+            if let Err(error) = announce_screenshot_clipboard_to_xwayland(state) {
+                tracing::warn!(%error, "could not export screenshot clipboard to XWayland");
+            }
             tracing::info!(
                 width = size.w,
                 height = size.h,
@@ -346,6 +349,22 @@ fn finish(
         }
     }
     Ok(())
+}
+
+pub(crate) fn announce_screenshot_clipboard_to_xwayland(state: &mut Villain) -> Result<(), String> {
+    let Some(xwm) = state.xwm.as_mut() else {
+        return Ok(());
+    };
+    xwm.new_selection(
+        SelectionTarget::Clipboard,
+        Some(vec![IMAGE_MIME.to_owned()]),
+    )
+    .map_err(|error| error.to_string())?;
+    // Smithay queues the owner change; this round trip flushes it so X11 apps
+    // can request the screenshot immediately after the shortcut completes.
+    xwm.get_randr_primary_output()
+        .map(|_| ())
+        .map_err(|error| error.to_string())
 }
 
 fn crop_pixels(
