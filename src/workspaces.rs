@@ -1055,6 +1055,18 @@ impl Villain {
             .map(|workspace| usize::from(workspace - 1))
             .unwrap_or(index);
         if target != index {
+            let Some(successor) = target.checked_add(1) else {
+                return;
+            };
+            if !self.ensure_workspace_exists(successor) {
+                tracing::warn!(
+                    app_id,
+                    title,
+                    workspace = target + 1,
+                    "window rule target workspace could not be materialized"
+                );
+                return;
+            }
             let entry = self.workspaces[index].windows.remove(position);
             let window_id = entry.id;
             let moved_window = entry.window.clone();
@@ -1098,6 +1110,7 @@ impl Villain {
             if maximized.is_some() {
                 destination.maximized = maximized;
             }
+            self.trim_dynamic_workspaces();
             self.configure_workspace(target);
             if index == self.active_workspace || target == self.active_workspace {
                 self.relayout_active_workspace();
