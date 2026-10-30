@@ -356,7 +356,8 @@ actions, not knavectl commands. Reload applies validated changes atomically.
 
 To skip empty slots when cycling with next/previous shortcuts or swipes, set
 `skip_empty = true` under `[compositor.workspace]` and reload. It defaults to
-false; direct number/bar selection still reaches empty slots. Minimized windows
+false; number shortcuts and bar clicks reach predefined slots and the existing
+dynamic tail, while next/previous navigation grows the tail. Minimized windows
 count as occupied. The default keeps one predefined workspace and one dynamic
 workspace. Set `predefined` to a larger positive number to keep a contiguous
 prefix permanently; the compositor retains all workspaces through the highest

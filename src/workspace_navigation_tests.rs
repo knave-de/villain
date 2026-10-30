@@ -155,11 +155,15 @@ fn sparse_navigation_and_preview_lifecycle() {
                 "closing last window never auto-leaves"
             );
             state.dispatch(Action::FocusWorkspace(5)).unwrap();
+            assert_eq!(
+                state.active_workspace, 0,
+                "number shortcut cannot select beyond the materialized tail"
+            );
             state.dispatch(Action::NextWorkspace).unwrap();
             state.dispatch(Action::PreviousWorkspace).unwrap();
             assert_eq!(
-                state.active_workspace, 4,
-                "all empty stays on selected slot"
+                state.active_workspace, 0,
+                "all empty navigation stays on the first workspace"
             );
         });
     });
@@ -204,36 +208,36 @@ fn last_workspace_tracks_successful_switches_and_toggles() {
     assert!(state.dispatch(Action::FocusWorkspace(0)).is_err());
     assert_eq!(
         state.last_workspace,
-        Some(0),
+        Some(6),
         "no-op/invalid switches preserve history"
     );
     state.config.workspace.skip_empty = true;
     state.dispatch(Action::LastWorkspace).unwrap();
     assert_eq!(
-        state.active_workspace, 0,
+        state.active_workspace, 6,
         "history includes empty workspaces"
     );
     state.dispatch(Action::LastWorkspace).unwrap();
-    assert_eq!(state.active_workspace, 6, "repeated use toggles");
+    assert_eq!(state.active_workspace, 10, "repeated use toggles");
     state.config.workspace.skip_empty = false;
     state.dispatch(Action::PreviousWorkspace).unwrap();
     state.dispatch(Action::LastWorkspace).unwrap();
     assert_eq!(
-        state.active_workspace, 6,
+        state.active_workspace, 10,
         "directional switches update history"
     );
     state.swipe_begin("pad".into(), 3, 1);
     state.swipe_update("pad", -100.0, 0.0, 2);
     state.swipe_end("pad", false, 3);
-    assert_eq!(state.active_workspace, 7);
+    assert_eq!(state.active_workspace, 11);
     state.dispatch(Action::LastWorkspace).unwrap();
-    assert_eq!(state.active_workspace, 6, "committed swipes update history");
+    assert_eq!(state.active_workspace, 10, "committed swipes update history");
     state.swipe_begin("pad".into(), 3, 4);
     state.swipe_update("pad", -100.0, 0.0, 5);
     state.swipe_end("pad", true, 6);
     state.dispatch(Action::LastWorkspace).unwrap();
     assert_eq!(
-        state.active_workspace, 7,
+        state.active_workspace, 11,
         "cancelled swipes preserve history"
     );
 }

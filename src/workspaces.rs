@@ -1045,11 +1045,11 @@ impl Villain {
         if source == target {
             return true;
         }
+        self.cancel_swipe(0);
+        self.cancel_workspace_motion();
         if !self.ensure_workspace_exists(target) {
             return false;
         }
-        self.cancel_swipe(0);
-        self.cancel_workspace_motion();
         self.release_pointer_buttons();
         let workspace = &self.workspaces[source];
         let mut root = self.window_id(&focused).unwrap();
@@ -1148,10 +1148,10 @@ impl Villain {
     }
 
     pub(crate) fn switch_workspace_immediate(&mut self, index: usize) {
+        self.cancel_swipe(0);
         if !self.ensure_workspace_exists(index) {
             return;
         }
-        self.cancel_swipe(0);
         self.remember_current_window_focus();
         if !self
             .pointer

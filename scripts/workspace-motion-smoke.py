@@ -143,8 +143,9 @@ def main():
         if not args.baseline:
             check(len(third['motion']) == 3 and third['active_workspace'] == 3, 'rapid third target preserves outgoing tracks')
         settle(3)
-        select(10)
-        settle(10)
+        for workspace in range(4, 11):
+            select(workspace)
+            settle(workspace)
         call('key', 'Super_L+Right')
         advanced = query()
         if not args.baseline:
