@@ -79,6 +79,12 @@ or root-level compatibility projection.
 The tracked `config.example.toml` demonstrates the `[compositor]` section of
 Knave's canonical config. Villain does not install a separate config file.
 
+`compositor.switch_to_new_window_workspace` defaults to `true`. When a new
+window is placed on another workspace by a placement rule, or uses a launch
+workspace because it has no placement rule, Villain switches to that workspace
+before focusing the window. Set the option to `false` to keep the current
+workspace active when a new window is placed elsewhere.
+
 ## Repository boundaries
 
 | Area | Owner |
@@ -364,6 +370,9 @@ Panels and the cursor stay stationary. See the
 Override entries under `[[compositor.gesture.bind]]` by fingers and direction;
 `action = "none"` disables the matching compositor gesture. These are Villain
 actions, not knavectl commands. Reload applies validated changes atomically.
+
+Other libinput pointer gestures pass through to the focused client: pinch
+forwards scale, center movement and rotation, while hold forwards begin/end.
 
 To skip empty slots when cycling with next/previous shortcuts or swipes, set
 `skip_empty = true` under `[compositor.workspace]` and reload. It defaults to

@@ -11,11 +11,12 @@ use smithay::{
         selection::{
             SelectionTarget,
             data_device::{
-                clear_data_device_selection, request_data_device_client_selection,
-                set_data_device_selection,
+                clear_data_device_selection, current_data_device_selection_userdata,
+                request_data_device_client_selection, set_data_device_selection,
             },
             primary_selection::{
-                clear_primary_selection, request_primary_client_selection, set_primary_selection,
+                clear_primary_selection, current_primary_selection_userdata,
+                request_primary_client_selection, set_primary_selection,
             },
         },
         xwayland_shell::{XWaylandShellHandler, XWaylandShellState},
@@ -100,6 +101,15 @@ pub fn init(event_loop: &mut EventLoop<'static, Villain>, state: &mut Villain) {
                     .config
                     .environment
                     .insert("DISPLAY".into(), format!(":{display_number}"));
+                let screenshot_selection_is_active = current_data_device_selection_userdata(&state.seat)
+                    .is_some_and(|payload| {
+                        matches!(&*payload, crate::screenshot::SelectionPayload::Png(_))
+                    });
+                if screenshot_selection_is_active
+                    && let Err(error) = crate::screenshot::announce_screenshot_clipboard_to_xwayland(state)
+                {
+                    tracing::warn!(%error, "could not announce existing screenshot clipboard to XWayland");
+                }
                 if state.owns_session {
                     crate::session::activate(state, false);
                 }
@@ -356,6 +366,19 @@ impl XwmHandler for Villain {
         mime_type: String,
         fd: OwnedFd,
     ) {
+        let server_selection = match selection {
+            SelectionTarget::Clipboard => {
+                current_data_device_selection_userdata(&self.seat).map(|data| data.clone())
+            }
+            SelectionTarget::Primary => {
+                current_primary_selection_userdata(&self.seat).map(|data| data.clone())
+            }
+        };
+        if let Some(payload) = server_selection {
+            crate::screenshot::send_selection(self, &mime_type, fd, &payload);
+            return;
+        }
+
         let result = match selection {
             SelectionTarget::Clipboard => {
                 request_data_device_client_selection(&self.seat, mime_type, fd)
@@ -432,6 +455,78 @@ mod tests {
     /// an isolated XDG_RUNTIME_DIR; no desktop session or GPU is required.
     #[test]
     #[ignore = "requires Xwayland and an isolated XDG_RUNTIME_DIR"]
+    fn xwayland_ready_announces_existing_screenshot_clipboard() {
+        let mut event_loop = EventLoop::try_new().unwrap();
+        let mut state = Villain::new(
+            &mut event_loop,
+            Display::new().unwrap(),
+            crate::config::RuntimeConfig::load().unwrap(),
+        );
+        let output = smithay::output::Output::new(
+            "test".into(),
+            smithay::output::PhysicalProperties {
+                size: (0, 0).into(),
+                subpixel: smithay::output::Subpixel::Unknown,
+                make: "test".into(),
+                model: "test".into(),
+            },
+        );
+        output.create_global::<Villain>(&state.display_handle);
+        let mode = smithay::output::Mode {
+            size: (800, 600).into(),
+            refresh: 60_000,
+        };
+        output.change_current_state(Some(mode), None, None, Some((0, 0).into()));
+        output.set_preferred(mode);
+        state.space.map_output(&output, (0, 0));
+        smithay::wayland::selection::data_device::set_data_device_selection::<Villain>(
+            &state.display_handle,
+            &state.seat,
+            vec!["image/png".into()],
+            crate::screenshot::SelectionPayload::Png(std::sync::Arc::from([1, 2, 3])),
+        );
+
+        init(&mut event_loop, &mut state);
+        pump_until(&mut event_loop, &mut state, |state| {
+            state.xwayland_display.is_some()
+        });
+        let display = format!(":{}", state.xwayland_display.unwrap());
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            sender
+                .send(smithay::reexports::x11rb::connect(Some(&display)))
+                .unwrap()
+        });
+        let mut connection = None;
+        pump_until(&mut event_loop, &mut state, |_| {
+            connection = receiver.try_recv().ok();
+            connection.is_some()
+        });
+        let (conn, screen) = connection.unwrap().unwrap();
+        let clipboard_atom = conn
+            .intern_atom(false, b"CLIPBOARD")
+            .unwrap()
+            .reply()
+            .unwrap()
+            .atom;
+        pump_until(&mut event_loop, &mut state, |_| {
+            conn.get_selection_owner(clipboard_atom)
+                .unwrap()
+                .reply()
+                .unwrap()
+                .owner
+                != smithay::reexports::x11rb::NONE
+        });
+        assert_ne!(
+            conn.setup().roots[screen].root,
+            smithay::reexports::x11rb::NONE
+        );
+    }
+
+    /// Uses a private, headless compositor and a real XWayland server. Run with
+    /// an isolated XDG_RUNTIME_DIR; no desktop session or GPU is required.
+    #[test]
+    #[ignore = "requires Xwayland and an isolated XDG_RUNTIME_DIR"]
     fn x11_workspace_input_isolation() {
         let mut event_loop = EventLoop::try_new().unwrap();
         let mut state = Villain::new(
@@ -474,6 +569,28 @@ mod tests {
         });
         let (conn, screen) = connection.unwrap().unwrap();
         let root = conn.setup().roots[screen].root;
+        let clipboard_atom = conn
+            .intern_atom(false, b"CLIPBOARD")
+            .unwrap()
+            .reply()
+            .unwrap()
+            .atom;
+        smithay::wayland::selection::data_device::set_data_device_selection::<Villain>(
+            &state.display_handle,
+            &state.seat,
+            vec!["image/png".into()],
+            crate::screenshot::SelectionPayload::Png(std::sync::Arc::from([1, 2, 3])),
+        );
+        crate::screenshot::announce_screenshot_clipboard_to_xwayland(&mut state)
+            .expect("announce screenshot clipboard to XWayland");
+        pump_until(&mut event_loop, &mut state, |_| {
+            conn.get_selection_owner(clipboard_atom)
+                .unwrap()
+                .reply()
+                .unwrap()
+                .owner
+                != smithay::reexports::x11rb::NONE
+        });
         let create = |override_redirect: bool, parent: Option<u32>, maximized: bool| {
             let id = conn.generate_id().unwrap();
             conn.create_window(
@@ -528,6 +645,53 @@ mod tests {
                 .window_for_x11_id(first)
                 .is_some_and(|window| window.x11_surface().unwrap().wl_surface().is_some())
         });
+        let image_png_atom = conn
+            .intern_atom(false, b"image/png")
+            .unwrap()
+            .reply()
+            .unwrap()
+            .atom;
+        let property_atom = conn
+            .intern_atom(false, b"KNAVE_TEST_IMAGE")
+            .unwrap()
+            .reply()
+            .unwrap()
+            .atom;
+        conn.convert_selection(
+            first,
+            clipboard_atom,
+            image_png_atom,
+            property_atom,
+            smithay::reexports::x11rb::CURRENT_TIME,
+        )
+        .unwrap();
+        conn.flush().unwrap();
+        let mut selection_notify = None;
+        pump_until(&mut event_loop, &mut state, |_| {
+            while let Some(event) = conn.poll_for_event().unwrap() {
+                if let smithay::reexports::x11rb::protocol::Event::SelectionNotify(event) = event {
+                    selection_notify = Some(event);
+                }
+            }
+            selection_notify.is_some()
+                && conn
+                    .get_property(false, first, property_atom, AtomEnum::ANY, 0, 1024)
+                    .unwrap()
+                    .reply()
+                    .unwrap()
+                    .value
+                    == [1, 2, 3]
+        });
+        assert_eq!(selection_notify.unwrap().property, property_atom);
+        assert_eq!(
+            conn.get_property(false, first, property_atom, AtomEnum::ANY, 0, 1024)
+                .unwrap()
+                .reply()
+                .unwrap()
+                .value,
+            [1, 2, 3],
+            "XWayland should receive the screenshot PNG bytes"
+        );
         let first_window = state.window_for_x11_id(first).unwrap();
         assert!(!first_window.x11_surface().unwrap().is_maximized());
         assert!(
