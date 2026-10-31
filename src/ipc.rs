@@ -69,6 +69,11 @@ const IO_TIMEOUT: Duration = Duration::from_secs(2);
 const QUEUED: u8 = 0;
 const EXECUTING: u8 = 1;
 const CANCELLED: u8 = 2;
+impl IpcServer {
+    pub(crate) fn publish_event(&mut self, event: DesktopEvent) {
+        self.subscriptions.publish_event(event);
+    }
+}
 impl Drop for IpcServer {
     fn drop(&mut self) {
         self.handle.remove(self.listener);
@@ -440,6 +445,27 @@ impl Villain {
                 invalid_request("Subscribe requires a dedicated transport".into())
             }
             DesktopRequest::SetOverviewPanes { panes } => self.set_overview_panes(panes),
+            DesktopRequest::RegisterGlobalShortcut {
+                app_id,
+                session_handle,
+                shortcut_id,
+                trigger,
+            } => self.register_global_shortcut(app_id, session_handle, shortcut_id, trigger),
+            DesktopRequest::ReplaceGlobalShortcut {
+                app_id,
+                session_handle,
+                shortcut_id,
+                trigger,
+            } => self.replace_global_shortcut(app_id, session_handle, shortcut_id, trigger),
+            DesktopRequest::UnregisterGlobalShortcut {
+                app_id,
+                session_handle,
+                shortcut_id,
+            } => {
+                self.global_keybinds
+                    .unregister_global(&app_id, &session_handle, &shortcut_id);
+                DesktopResponse::Ok
+            }
             DesktopRequest::Dispatch(command) => match self.dispatch(Dispatch::from(command)) {
                 Ok(()) => DesktopResponse::Ok,
                 Err(error) => dispatch_error(error),
@@ -488,6 +514,75 @@ impl Villain {
                     component: format!("villain {}", env!("CARGO_PKG_VERSION")),
                 },
             },
+        }
+    }
+
+    fn replace_global_shortcut(
+        &mut self,
+        app_id: String,
+        session_handle: String,
+        shortcut_id: String,
+        trigger: String,
+    ) -> DesktopResponse {
+        if app_id.is_empty()
+            || app_id.len() > 255
+            || session_handle.is_empty()
+            || session_handle.len() > 255
+            || shortcut_id.is_empty()
+            || shortcut_id.len() > 128
+            || trigger.len() > 64
+        {
+            return invalid_request("global shortcut field exceeds its size limit".into());
+        }
+        match self.global_keybinds.replace_global(
+            &self.config.keybinds,
+            &app_id,
+            &session_handle,
+            &shortcut_id,
+            &trigger,
+            "Super",
+        ) {
+            Ok(trigger) => DesktopResponse::GlobalShortcutRegistered { trigger },
+            Err(error) => invalid_request(error),
+        }
+    }
+
+    fn register_global_shortcut(
+        &mut self,
+        app_id: String,
+        session_handle: String,
+        shortcut_id: String,
+        trigger: String,
+    ) -> DesktopResponse {
+        if app_id.len() > 255
+            || session_handle.len() > 255
+            || shortcut_id.len() > 128
+            || trigger.len() > 64
+        {
+            return invalid_request("global shortcut field exceeds its size limit".into());
+        }
+        match self
+            .config
+            .keybinds
+            .conflicts_with(&self.global_keybinds, &trigger, "Super")
+        {
+            Ok(true) => {
+                return invalid_request(
+                    "global shortcut trigger conflicts with an existing binding".into(),
+                );
+            }
+            Err(error) => return invalid_request(error),
+            Ok(false) => {}
+        }
+        match self.global_keybinds.register_global(
+            app_id,
+            session_handle,
+            shortcut_id,
+            &trigger,
+            "Super",
+        ) {
+            Ok(trigger) => DesktopResponse::GlobalShortcutRegistered { trigger },
+            Err(error) => invalid_request(error),
         }
     }
 }

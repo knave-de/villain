@@ -4,15 +4,18 @@ use knave_desktop_api::{
     MAX_SNAPSHOT_FRAME_BYTES,
 };
 use std::{
+    collections::VecDeque,
     io::{self, Read, Write},
     os::{fd::AsRawFd, unix::net::UnixStream},
     sync::{Arc, Mutex, Weak},
 };
 
 type Frame = Arc<[u8]>;
+const MAX_PENDING_SHORTCUT_EVENTS: usize = 64;
 pub(super) struct Subscriber {
     latest: Mutex<Option<Frame>>,
     event: Mutex<Option<Frame>>,
+    shortcut_events: Mutex<VecDeque<Frame>>,
     wake: UnixStream,
 }
 impl Subscriber {
@@ -24,6 +27,7 @@ impl Subscriber {
             Arc::new(Self {
                 latest: Mutex::new(None),
                 event: Mutex::new(None),
+                shortcut_events: Mutex::new(VecDeque::new()),
                 wake,
             }),
             reader,
@@ -53,6 +57,26 @@ impl Subscriber {
             return false;
         }
         true
+    }
+
+    fn publish_shortcut_event(&self, frame: Frame) -> bool {
+        let mut queue = self.shortcut_events.lock().unwrap();
+        if queue.len() >= MAX_PENDING_SHORTCUT_EVENTS {
+            queue.clear();
+            let mut frame = serde_json::to_vec(&DesktopResponse::Error(DesktopError {
+                code: DesktopErrorCode::Unavailable,
+                message: "Global shortcut event queue overflowed".into(),
+                retryable: true,
+            }))
+            .expect("error serializes");
+            frame.push(b'\n');
+            queue.push_back(frame.into());
+        } else {
+            queue.push_back(frame);
+        }
+        let notify = queue.len() == 1;
+        drop(queue);
+        !notify || self.wake()
     }
 }
 
@@ -93,6 +117,11 @@ impl Subscriptions {
         if self.subscribers.is_empty() {
             return;
         }
+        let shortcut_event = matches!(
+            &event,
+            DesktopEvent::GlobalShortcutActivated { .. }
+                | DesktopEvent::GlobalShortcutDeactivated { .. }
+        );
         let mut frame =
             serde_json::to_vec(&DesktopResponse::Event(event)).expect("event serializes");
         if frame.len() as u64 >= MAX_SNAPSHOT_FRAME_BYTES {
@@ -106,9 +135,13 @@ impl Subscriptions {
         frame.push(b'\n');
         let frame: Frame = frame.into();
         self.subscribers.retain(|subscriber| {
-            subscriber
-                .upgrade()
-                .is_some_and(|s| s.publish_event(frame.clone()))
+            subscriber.upgrade().is_some_and(|s| {
+                if shortcut_event {
+                    s.publish_shortcut_event(frame.clone())
+                } else {
+                    s.publish_event(frame.clone())
+                }
+            })
         });
     }
     pub(super) fn subscribe(&mut self, subscriber: &Arc<Subscriber>) {
@@ -181,7 +214,16 @@ pub(super) fn serve(
         }
         let snapshot_frame = subscriber.latest.lock().unwrap().take();
         let event_frame = subscriber.event.lock().unwrap().take();
-        let frames = snapshot_frame.into_iter().chain(event_frame);
+        let shortcut_frames = subscriber
+            .shortcut_events
+            .lock()
+            .unwrap()
+            .drain(..)
+            .collect::<Vec<_>>();
+        let frames = snapshot_frame
+            .into_iter()
+            .chain(event_frame)
+            .chain(shortcut_frames);
         for frame in frames {
             stream.write_all(&frame)?;
         }

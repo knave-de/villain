@@ -14,6 +14,8 @@ use crate::{
     state::Villain,
 };
 
+const MAX_GLOBAL_SHORTCUTS: usize = 1024;
+
 #[derive(Clone, Debug, PartialEq)]
 enum KeyboardAction {
     Dispatch(Dispatch),
@@ -51,6 +53,117 @@ pub struct KeybindRegistry {
 impl KeybindRegistry {
     pub fn defaults(modkey: &str) -> Result<Self, String> {
         Self::from_specs(modkey, &Self::default_specs())
+    }
+
+    pub(crate) fn empty() -> Self {
+        Self {
+            bindings: Vec::new(),
+        }
+    }
+
+    pub(crate) fn conflicts_with(
+        &self,
+        other: &Self,
+        trigger: &str,
+        modkey: &str,
+    ) -> Result<bool, String> {
+        let modkey = parse_modkey(modkey)?;
+        let key = parse_portal_trigger(trigger, modkey)?;
+        let reserved_session_chord = key == parse_portal_trigger("CTRL+ALT+BACKSPACE", modkey)?
+            || (1..=12).any(|number| {
+                parse_portal_trigger(&format!("CTRL+ALT+F{number}"), modkey)
+                    .is_ok_and(|reserved| key == reserved)
+            });
+        Ok(reserved_session_chord
+            || self
+                .bindings
+                .iter()
+                .chain(&other.bindings)
+                .any(|binding| binding.keys == key))
+    }
+
+    pub(crate) fn register_global(
+        &mut self,
+        app_id: String,
+        session_handle: String,
+        shortcut_id: String,
+        trigger: &str,
+        modkey: &str,
+    ) -> Result<String, String> {
+        if app_id.is_empty() || shortcut_id.is_empty() {
+            return Err("app ID and shortcut ID must not be empty".into());
+        }
+        if self.bindings.iter().any(|binding| {
+            matches!(&binding.dispatch, Dispatch::GlobalShortcutActivated { app_id: owner, session_handle: session, shortcut_id: id } if owner == &app_id && session == &session_handle && id == &shortcut_id)
+        }) {
+            return Err("shortcut ID is already registered for this app".into());
+        }
+        let keys = parse_portal_trigger(trigger, parse_modkey(modkey)?)?;
+        if self.bindings.iter().any(|binding| binding.keys == keys) {
+            return Err("shortcut trigger is already registered".into());
+        }
+        if self.bindings.len() >= MAX_GLOBAL_SHORTCUTS {
+            return Err("global shortcut registration limit reached".into());
+        }
+        let trigger = canonical_portal_trigger(trigger);
+        self.bindings.push(Keybind {
+            keys,
+            dispatch: Dispatch::GlobalShortcutActivated {
+                app_id,
+                session_handle,
+                shortcut_id: shortcut_id.clone(),
+            },
+        });
+        Ok(trigger)
+    }
+
+    pub(crate) fn replace_global(
+        &mut self,
+        configured: &Self,
+        app_id: &str,
+        session_handle: &str,
+        shortcut_id: &str,
+        trigger: &str,
+        modkey: &str,
+    ) -> Result<String, String> {
+        let index = self.bindings.iter().position(|binding| {
+            matches!(&binding.dispatch, Dispatch::GlobalShortcutActivated { app_id: owner, session_handle: session, shortcut_id: id } if owner == app_id && session == session_handle && id == shortcut_id)
+        }).ok_or_else(|| "global shortcut is not registered".to_string())?;
+        let modkey = parse_modkey(modkey)?;
+        let key = parse_portal_trigger(trigger, modkey)?;
+        let reserved = key == parse_portal_trigger("CTRL+ALT+BACKSPACE", modkey)?
+            || (1..=12).any(|number| {
+                parse_portal_trigger(&format!("CTRL+ALT+F{number}"), modkey)
+                    .is_ok_and(|reserved| key == reserved)
+            });
+        if reserved
+            || configured
+                .bindings
+                .iter()
+                .any(|binding| binding.keys == key)
+            || self
+                .bindings
+                .iter()
+                .enumerate()
+                .any(|(other_index, binding)| other_index != index && binding.keys == key)
+        {
+            return Err("global shortcut trigger conflicts with an existing binding".into());
+        }
+        self.bindings[index].keys = key;
+        Ok(canonical_portal_trigger(trigger))
+    }
+
+    pub(crate) fn unregister_global(
+        &mut self,
+        app_id: &str,
+        session_handle: &str,
+        shortcut_id: &str,
+    ) -> bool {
+        let before = self.bindings.len();
+        self.bindings.retain(|binding| {
+            !matches!(&binding.dispatch, Dispatch::GlobalShortcutActivated { app_id: owner, session_handle: session, shortcut_id: id } if owner == app_id && session == session_handle && id == shortcut_id)
+        });
+        self.bindings.len() != before
     }
 
     /// Apply explicit bindings on top of the default set. An explicit binding
@@ -308,6 +421,52 @@ fn parse_keys(value: &str, modkey: Modkey) -> Result<KeyCombination, String> {
     })
 }
 
+fn parse_portal_trigger(value: &str, modkey: Modkey) -> Result<KeyCombination, String> {
+    if value
+        .split('+')
+        .any(|token| token.trim().eq_ignore_ascii_case("MOD"))
+    {
+        return Err("global shortcut triggers must name modifiers explicitly".into());
+    }
+    let normalized = value
+        .split('+')
+        .map(str::trim)
+        .filter(|token| !token.is_empty())
+        .map(|token| {
+            let upper = token.to_ascii_uppercase();
+            match upper.as_str() {
+                "CONTROL" => "CTRL".to_string(),
+                "LOGO" => "SUPER".to_string(),
+                _ => upper.strip_prefix("KEY_").unwrap_or(&upper).to_string(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("+");
+    let combination = parse_keys(&normalized, modkey)?;
+    if matches!(combination.key, BindingKey::Keysym(_)) {
+        Ok(combination)
+    } else {
+        Err("global shortcuts require one keyboard key".into())
+    }
+}
+
+fn canonical_portal_trigger(value: &str) -> String {
+    value
+        .split('+')
+        .map(str::trim)
+        .filter(|token| !token.is_empty())
+        .map(|token| {
+            let upper = token.to_ascii_uppercase();
+            match upper.as_str() {
+                "CONTROL" => "CTRL".to_string(),
+                "LOGO" => "SUPER".to_string(),
+                _ => upper.strip_prefix("KEY_").unwrap_or(&upper).to_string(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("+")
+}
+
 fn parse_dispatch(spec: &BindSpec) -> Result<Dispatch, String> {
     match spec.dispatch.as_str() {
         "move-window" | "resize-window" => {
@@ -449,6 +608,18 @@ pub(crate) fn handle_keyboard_key(
         keyboard.input_intercept(state, code, key_state, |state, mods, key| {
             let inhibited = shortcuts_inhibited(state);
             if !pressed
+                && let Some((app_id, session_handle, shortcut_id)) =
+                    state.active_global_shortcuts.remove(&code)
+            {
+                return FilterResult::Intercept(Some(KeyboardAction::Dispatch(
+                    Dispatch::GlobalShortcutDeactivated {
+                        app_id,
+                        session_handle,
+                        shortcut_id,
+                    },
+                )));
+            }
+            if !pressed
                 && state
                     .pending_modifier
                     .as_ref()
@@ -564,14 +735,31 @@ pub(crate) fn handle_keyboard_key(
             }
             if pressed
                 && !inhibited
-                && let Some(action) = state.config.keybinds.find(
-                    &key.raw_syms(),
-                    mods.ctrl,
-                    mods.alt,
-                    mods.shift,
-                    mods.logo,
-                )
+                && let Some(action) = state
+                    .config
+                    .keybinds
+                    .find(&key.raw_syms(), mods.ctrl, mods.alt, mods.shift, mods.logo)
+                    .or_else(|| {
+                        state.global_keybinds.find(
+                            &key.raw_syms(),
+                            mods.ctrl,
+                            mods.alt,
+                            mods.shift,
+                            mods.logo,
+                        )
+                    })
             {
+                if let Dispatch::GlobalShortcutActivated {
+                    app_id,
+                    session_handle,
+                    shortcut_id,
+                } = &action
+                {
+                    state.active_global_shortcuts.insert(
+                        code,
+                        (app_id.clone(), session_handle.clone(), shortcut_id.clone()),
+                    );
+                }
                 state.suppressed_keys.insert(code);
                 return FilterResult::Intercept(Some(KeyboardAction::Dispatch(action)));
             }
@@ -618,6 +806,53 @@ pub(crate) fn handle_keyboard_key(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn global_shortcut_replacement_is_atomic_on_conflict() {
+        let configured = KeybindRegistry::defaults("Super").unwrap();
+        let mut globals = KeybindRegistry::empty();
+        globals
+            .register_global(
+                "app.one".into(),
+                "/session/one".into(),
+                "toggle".into(),
+                "CTRL+F9",
+                "Super",
+            )
+            .unwrap();
+        globals
+            .register_global(
+                "app.two".into(),
+                "/session/two".into(),
+                "toggle".into(),
+                "CTRL+F10",
+                "Super",
+            )
+            .unwrap();
+        assert!(
+            globals
+                .replace_global(
+                    &configured,
+                    "app.one",
+                    "/session/one",
+                    "toggle",
+                    "CTRL+F10",
+                    "Super"
+                )
+                .is_err()
+        );
+        assert_eq!(
+            globals.replace_global(
+                &configured,
+                "app.one",
+                "/session/one",
+                "toggle",
+                "CTRL+F11",
+                "Super"
+            ),
+            Ok("CTRL+F11".into())
+        );
+    }
 
     #[test]
     fn mouse_bindings_use_modkey_and_can_be_overridden() {

@@ -156,6 +156,17 @@ restores normal binding handling. Session escape chords are not inhibitable:
 Ctrl+Alt+Backspace and the Ctrl+Alt+F1..F12 VT-switching chords keep working
 under inhibitors so a client can never lock the user out of the session.
 
+## Application global shortcuts
+
+Applications use the XDG `org.freedesktop.portal.GlobalShortcuts` interface.
+The Knave portal backend registers preferred triggers with Villain through the
+private desktop API; Villain rejects triggers already claimed by compositor
+bindings or another registered application. The portal sends `Activated` when
+the key is pressed and `Deactivated` when it is released. Closing the portal
+session removes its registrations. Configurable shortcut assignment is not yet
+available, so apps should provide a preferred trigger and handle an empty bind
+result when it conflicts.
+
 ## Move to workspace
 
 `MOD+Shift+1` through `MOD+Shift+9` send the focused window to that

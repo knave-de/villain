@@ -54,6 +54,16 @@ pub enum Dispatch {
         mode: crate::screenshot::ScreenshotMode,
         clipboard: bool,
     },
+    GlobalShortcutActivated {
+        app_id: String,
+        session_handle: String,
+        shortcut_id: String,
+    },
+    GlobalShortcutDeactivated {
+        app_id: String,
+        session_handle: String,
+        shortcut_id: String,
+    },
 }
 
 impl From<DesktopCommand> for Dispatch {
@@ -277,6 +287,34 @@ impl Villain {
             }
             Dispatch::Screenshot { mode, clipboard } => {
                 crate::screenshot::begin(self, mode, clipboard).map_err(DispatchError::Screenshot)
+            }
+            Dispatch::GlobalShortcutActivated {
+                app_id,
+                session_handle,
+                shortcut_id,
+            } => {
+                self.ipc_server.publish_event(
+                    knave_desktop_api::DesktopEvent::GlobalShortcutActivated {
+                        app_id,
+                        session_handle,
+                        shortcut_id,
+                    },
+                );
+                Ok(())
+            }
+            Dispatch::GlobalShortcutDeactivated {
+                app_id,
+                session_handle,
+                shortcut_id,
+            } => {
+                self.ipc_server.publish_event(
+                    knave_desktop_api::DesktopEvent::GlobalShortcutDeactivated {
+                        app_id,
+                        session_handle,
+                        shortcut_id,
+                    },
+                );
+                Ok(())
             }
         }
     }
