@@ -79,6 +79,12 @@ or root-level compatibility projection.
 The tracked `config.example.toml` demonstrates the `[compositor]` section of
 Knave's canonical config. Villain does not install a separate config file.
 
+`compositor.switch_to_new_window_workspace` defaults to `true`. When a new
+window is placed on another workspace by a placement rule, or uses a launch
+workspace because it has no placement rule, Villain switches to that workspace
+before focusing the window. Set the option to `false` to keep the current
+workspace active when a new window is placed elsewhere.
+
 ## Repository boundaries
 
 | Area | Owner |

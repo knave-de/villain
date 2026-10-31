@@ -1941,7 +1941,10 @@ impl Villain {
         let Some(id) = self.window_id(window) else {
             return false;
         };
-        if index != self.active_workspace || !self.window_is_visible(index, id) {
+        if !self.host_focused
+            || index != self.active_workspace
+            || !self.window_is_visible(index, id)
+        {
             return false;
         }
         let Some(surface) = KeyboardFocus::for_window(window) else {
