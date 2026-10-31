@@ -114,7 +114,7 @@ fn safe_popup_geometry(positioner: PositionerState, target: Option<[i64; 4]>) ->
     let width = i64::from(size.w);
     let height = i64::from(size.h);
     let Some([target_x, target_y, target_width, target_height]) = target else {
-        return Some(rect_from_i64(x, y, width, height)?);
+        return rect_from_i64(x, y, width, height);
     };
     let offsets = |x: i64, y: i64, width: i64, height: i64| {
         (
@@ -252,7 +252,7 @@ fn safe_popup_geometry(positioner: PositionerState, target: Option<[i64; 4]>) ->
             height -= bottom;
         }
     }
-    Some(rect_from_i64(x, y, width, height)?)
+    rect_from_i64(x, y, width, height)
 }
 
 fn safe_popup_geometry_unconstrained(positioner: PositionerState) -> Option<PopupRect> {
