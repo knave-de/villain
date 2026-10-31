@@ -779,6 +779,48 @@ impl XdgShellHandler for Villain {
     }
 }
 
+// Smithay's delegation macro connects the protocol objects to the handlers
+// above. It is intentionally at the bottom: the implementations are easier to
+// find before the generated dispatch glue.
+smithay::delegate_compositor!(Villain);
+smithay::delegate_cursor_shape!(Villain);
+smithay::delegate_data_device!(Villain);
+smithay::delegate_data_control!(Villain);
+smithay::delegate_ext_data_control!(Villain);
+smithay::delegate_output!(Villain);
+smithay::delegate_fractional_scale!(Villain);
+smithay::delegate_viewporter!(Villain);
+smithay::delegate_primary_selection!(Villain);
+smithay::delegate_seat!(Villain);
+smithay::delegate_pointer_gestures!(Villain);
+smithay::delegate_shm!(Villain);
+smithay::delegate_xdg_shell!(Villain);
+
+impl smithay::wayland::dmabuf::DmabufHandler for Villain {
+    fn dmabuf_state(&mut self) -> &mut smithay::wayland::dmabuf::DmabufState {
+        &mut self.dmabuf_state
+    }
+
+    fn dmabuf_imported(
+        &mut self,
+        _global: &smithay::wayland::dmabuf::DmabufGlobal,
+        dmabuf: smithay::backend::allocator::dmabuf::Dmabuf,
+        notifier: smithay::wayland::dmabuf::ImportNotifier,
+    ) {
+        use smithay::backend::renderer::ImportDma;
+        if self
+            .tty
+            .as_mut()
+            .is_some_and(|tty| tty.renderer.import_dmabuf(&dmabuf, None).is_ok())
+        {
+            let _ = notifier.successful::<Self>();
+        } else {
+            notifier.failed();
+        }
+    }
+}
+smithay::delegate_dmabuf!(Villain);
+
 #[cfg(test)]
 mod popup_geometry_tests {
     use super::*;
@@ -833,45 +875,3 @@ mod popup_geometry_tests {
         assert!(safe_popup_geometry_unconstrained(positioner).is_none());
     }
 }
-
-// Smithay's delegation macro connects the protocol objects to the handlers
-// above. It is intentionally at the bottom: the implementations are easier to
-// find before the generated dispatch glue.
-smithay::delegate_compositor!(Villain);
-smithay::delegate_cursor_shape!(Villain);
-smithay::delegate_data_device!(Villain);
-smithay::delegate_data_control!(Villain);
-smithay::delegate_ext_data_control!(Villain);
-smithay::delegate_output!(Villain);
-smithay::delegate_fractional_scale!(Villain);
-smithay::delegate_viewporter!(Villain);
-smithay::delegate_primary_selection!(Villain);
-smithay::delegate_seat!(Villain);
-smithay::delegate_pointer_gestures!(Villain);
-smithay::delegate_shm!(Villain);
-smithay::delegate_xdg_shell!(Villain);
-
-impl smithay::wayland::dmabuf::DmabufHandler for Villain {
-    fn dmabuf_state(&mut self) -> &mut smithay::wayland::dmabuf::DmabufState {
-        &mut self.dmabuf_state
-    }
-
-    fn dmabuf_imported(
-        &mut self,
-        _global: &smithay::wayland::dmabuf::DmabufGlobal,
-        dmabuf: smithay::backend::allocator::dmabuf::Dmabuf,
-        notifier: smithay::wayland::dmabuf::ImportNotifier,
-    ) {
-        use smithay::backend::renderer::ImportDma;
-        if self
-            .tty
-            .as_mut()
-            .is_some_and(|tty| tty.renderer.import_dmabuf(&dmabuf, None).is_ok())
-        {
-            let _ = notifier.successful::<Self>();
-        } else {
-            notifier.failed();
-        }
-    }
-}
-smithay::delegate_dmabuf!(Villain);
