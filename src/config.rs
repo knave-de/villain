@@ -33,6 +33,7 @@ pub struct RuntimeConfig {
     pub output_scale: f64,
     pub master_percent: u8,
     pub focus_cycle_order: knave_config::FocusCycleOrder,
+    pub switch_to_new_window_workspace: bool,
     pub workspace: knave_config::CompositorWorkspaceConfig,
     pub appearance: knave_config::WindowAppearance,
     pub input: InputConfig,
@@ -199,6 +200,7 @@ impl RuntimeConfig {
             output_scale,
             master_percent: compositor.master_percent,
             focus_cycle_order: compositor.focus_cycle_order,
+            switch_to_new_window_workspace: compositor.switch_to_new_window_workspace,
             workspace: compositor.workspace,
             appearance: compositor.appearance.clone(),
             input: InputConfig {
