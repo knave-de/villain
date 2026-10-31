@@ -293,7 +293,7 @@ impl Villain {
                 session_handle,
                 shortcut_id,
             } => {
-                self.ipc_server.subscriptions.publish_event(
+                self.ipc_server.publish_event(
                     knave_desktop_api::DesktopEvent::GlobalShortcutActivated {
                         app_id,
                         session_handle,
@@ -307,7 +307,7 @@ impl Villain {
                 session_handle,
                 shortcut_id,
             } => {
-                self.ipc_server.subscriptions.publish_event(
+                self.ipc_server.publish_event(
                     knave_desktop_api::DesktopEvent::GlobalShortcutDeactivated {
                         app_id,
                         session_handle,

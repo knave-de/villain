@@ -69,6 +69,11 @@ const IO_TIMEOUT: Duration = Duration::from_secs(2);
 const QUEUED: u8 = 0;
 const EXECUTING: u8 = 1;
 const CANCELLED: u8 = 2;
+impl IpcServer {
+    pub(crate) fn publish_event(&mut self, event: DesktopEvent) {
+        self.subscriptions.publish_event(event);
+    }
+}
 impl Drop for IpcServer {
     fn drop(&mut self) {
         self.handle.remove(self.listener);
