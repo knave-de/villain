@@ -2,7 +2,7 @@
 
 use smithay::{
     backend::renderer::utils::on_commit_buffer_handler,
-    desktop::{PopupKind, find_popup_root_surface, get_popup_toplevel_coords},
+    desktop::{PopupKind, find_popup_root_surface, layer_map_for_output},
     reexports::calloop::Interest,
     reexports::wayland_server::{
         Client, Resource,
@@ -12,14 +12,14 @@ use smithay::{
         buffer::BufferHandler,
         compositor::{
             BufferAssignment, CompositorClientState, CompositorHandler, CompositorState,
-            SurfaceAttributes, add_blocker, add_pre_commit_hook, with_states,
+            SurfaceAttributes, add_blocker, add_pre_commit_hook, get_role, with_states,
         },
         dmabuf::get_dmabuf,
         fractional_scale::{FractionalScaleHandler, with_fractional_scale},
         output::OutputHandler,
         shell::xdg::{
-            PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
-            XdgToplevelSurfaceData,
+            PopupSurface, PositionerState, ToplevelSurface, XDG_POPUP_ROLE, XdgPopupSurfaceData,
+            XdgShellHandler, XdgShellState, XdgToplevelSurfaceData,
         },
         shm::{ShmHandler, ShmState},
     },
@@ -40,6 +40,231 @@ use smithay::{
     xwayland::XWaylandClientData,
 };
 use std::os::fd::OwnedFd;
+
+type PopupRect = smithay::utils::Rectangle<i32, smithay::utils::Logical>;
+
+fn safe_popup_geometry(positioner: PositionerState, target: Option<[i64; 4]>) -> Option<PopupRect> {
+    use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_positioner::{
+        Anchor, ConstraintAdjustment, Gravity,
+    };
+
+    let has_anchor_left = matches!(
+        positioner.anchor_edges,
+        Anchor::Left | Anchor::TopLeft | Anchor::BottomLeft
+    );
+    let has_anchor_right = matches!(
+        positioner.anchor_edges,
+        Anchor::Right | Anchor::TopRight | Anchor::BottomRight
+    );
+    let has_anchor_top = matches!(
+        positioner.anchor_edges,
+        Anchor::Top | Anchor::TopLeft | Anchor::TopRight
+    );
+    let has_anchor_bottom = matches!(
+        positioner.anchor_edges,
+        Anchor::Bottom | Anchor::BottomLeft | Anchor::BottomRight
+    );
+    let has_gravity_left = matches!(
+        positioner.gravity,
+        Gravity::Left | Gravity::TopLeft | Gravity::BottomLeft
+    );
+    let has_gravity_right = matches!(
+        positioner.gravity,
+        Gravity::Right | Gravity::TopRight | Gravity::BottomRight
+    );
+    let has_gravity_top = matches!(
+        positioner.gravity,
+        Gravity::Top | Gravity::TopLeft | Gravity::TopRight
+    );
+    let has_gravity_bottom = matches!(
+        positioner.gravity,
+        Gravity::Bottom | Gravity::BottomLeft | Gravity::BottomRight
+    );
+
+    let anchor = positioner.anchor_rect;
+    let size = positioner.rect_size;
+    let anchor_x = i64::from(anchor.loc.x)
+        + if has_anchor_left {
+            0
+        } else if has_anchor_right {
+            i64::from(anchor.size.w)
+        } else {
+            i64::from(anchor.size.w) / 2
+        };
+    let anchor_y = i64::from(anchor.loc.y)
+        + if has_anchor_top {
+            0
+        } else if has_anchor_bottom {
+            i64::from(anchor.size.h)
+        } else {
+            i64::from(anchor.size.h) / 2
+        };
+    let mut x = anchor_x + i64::from(positioner.offset.x);
+    let mut y = anchor_y + i64::from(positioner.offset.y);
+    if has_gravity_left {
+        x -= i64::from(size.w);
+    } else if !has_gravity_right {
+        x -= i64::from(size.w) / 2;
+    }
+    if has_gravity_top {
+        y -= i64::from(size.h);
+    } else if !has_gravity_bottom {
+        y -= i64::from(size.h) / 2;
+    }
+    let width = i64::from(size.w);
+    let height = i64::from(size.h);
+    let Some([target_x, target_y, target_width, target_height]) = target else {
+        return Some(rect_from_i64(x, y, width, height)?);
+    };
+    let offsets = |x: i64, y: i64, width: i64, height: i64| {
+        (
+            target_x - x,
+            x + width - (target_x + target_width),
+            target_y - y,
+            y + height - (target_y + target_height),
+        )
+    };
+    let (mut left, mut right, mut top, mut bottom) = offsets(x, y, width, height);
+
+    if (left > 0 || right > 0)
+        && positioner
+            .constraint_adjustment
+            .contains(ConstraintAdjustment::FlipX)
+    {
+        let mut flipped = positioner;
+        flipped.anchor_edges = match flipped.anchor_edges {
+            Anchor::Left => Anchor::Right,
+            Anchor::Right => Anchor::Left,
+            Anchor::TopLeft => Anchor::TopRight,
+            Anchor::TopRight => Anchor::TopLeft,
+            Anchor::BottomLeft => Anchor::BottomRight,
+            Anchor::BottomRight => Anchor::BottomLeft,
+            other => other,
+        };
+        flipped.gravity = match flipped.gravity {
+            Gravity::Left => Gravity::Right,
+            Gravity::Right => Gravity::Left,
+            Gravity::TopLeft => Gravity::TopRight,
+            Gravity::TopRight => Gravity::TopLeft,
+            Gravity::BottomLeft => Gravity::BottomRight,
+            Gravity::BottomRight => Gravity::BottomLeft,
+            other => other,
+        };
+        if let Some(rect) = safe_popup_geometry_unconstrained(flipped) {
+            let (new_left, new_right, _, _) = offsets(
+                i64::from(rect.loc.x),
+                i64::from(rect.loc.y),
+                i64::from(rect.size.w),
+                i64::from(rect.size.h),
+            );
+            if new_left <= 0 && new_right <= 0 {
+                x = i64::from(rect.loc.x);
+                y = i64::from(rect.loc.y);
+                left = 0;
+                right = 0;
+            }
+        }
+    }
+    if (top > 0 || bottom > 0)
+        && positioner
+            .constraint_adjustment
+            .contains(ConstraintAdjustment::FlipY)
+    {
+        let mut flipped = positioner;
+        flipped.anchor_edges = match flipped.anchor_edges {
+            Anchor::Top => Anchor::Bottom,
+            Anchor::Bottom => Anchor::Top,
+            Anchor::TopLeft => Anchor::BottomLeft,
+            Anchor::TopRight => Anchor::BottomRight,
+            Anchor::BottomLeft => Anchor::TopLeft,
+            Anchor::BottomRight => Anchor::TopRight,
+            other => other,
+        };
+        flipped.gravity = match flipped.gravity {
+            Gravity::Top => Gravity::Bottom,
+            Gravity::Bottom => Gravity::Top,
+            Gravity::TopLeft => Gravity::BottomLeft,
+            Gravity::TopRight => Gravity::BottomRight,
+            Gravity::BottomLeft => Gravity::TopLeft,
+            Gravity::BottomRight => Gravity::TopRight,
+            other => other,
+        };
+        if let Some(rect) = safe_popup_geometry_unconstrained(flipped) {
+            let (_, _, new_top, new_bottom) = offsets(
+                i64::from(rect.loc.x),
+                i64::from(rect.loc.y),
+                i64::from(rect.size.w),
+                i64::from(rect.size.h),
+            );
+            if new_top <= 0 && new_bottom <= 0 {
+                x = i64::from(rect.loc.x);
+                y = i64::from(rect.loc.y);
+                top = 0;
+                bottom = 0;
+            }
+        }
+    }
+    if positioner
+        .constraint_adjustment
+        .contains(ConstraintAdjustment::SlideX)
+    {
+        if left > 0 {
+            x += left;
+        } else if right > 0 {
+            x -= right.min(-left);
+        }
+        (left, right, _, _) = offsets(x, y, width, height);
+    }
+    if positioner
+        .constraint_adjustment
+        .contains(ConstraintAdjustment::SlideY)
+    {
+        if top > 0 {
+            y += top;
+        } else if bottom > 0 {
+            y -= bottom.min(-top);
+        }
+        (_, _, top, bottom) = offsets(x, y, width, height);
+    }
+    let mut width = width;
+    let mut height = height;
+    if positioner
+        .constraint_adjustment
+        .contains(ConstraintAdjustment::ResizeX)
+    {
+        if left > 0 && left < width {
+            x += left;
+            width -= left;
+        }
+        if right > 0 && right < width {
+            width -= right;
+        }
+    }
+    if positioner
+        .constraint_adjustment
+        .contains(ConstraintAdjustment::ResizeY)
+    {
+        if top > 0 && top < height {
+            y += top;
+            height -= top;
+        }
+        if bottom > 0 && bottom < height {
+            height -= bottom;
+        }
+    }
+    Some(rect_from_i64(x, y, width, height)?)
+}
+
+fn safe_popup_geometry_unconstrained(positioner: PositionerState) -> Option<PopupRect> {
+    safe_popup_geometry(positioner, None)
+}
+
+fn rect_from_i64(x: i64, y: i64, width: i64, height: i64) -> Option<PopupRect> {
+    Some(smithay::utils::Rectangle::new(
+        (i32::try_from(x).ok()?, i32::try_from(y).ok()?).into(),
+        (i32::try_from(width).ok()?, i32::try_from(height).ok()?).into(),
+    ))
+}
 
 use crate::state::{ClientState, Villain};
 use crate::workspaces::WindowAction;
@@ -311,23 +536,64 @@ impl Villain {
         positioner: PositionerState,
     ) -> smithay::utils::Rectangle<i32, smithay::utils::Logical> {
         let popup = PopupKind::Xdg(surface.clone());
+        let fallback = || safe_popup_geometry_unconstrained(positioner).unwrap_or_default();
         let Ok(root) = find_popup_root_surface(&popup) else {
-            return positioner.get_geometry();
-        };
-        let Some(window) = self.window_for_surface(&root) else {
-            return positioner.get_geometry();
-        };
-        let Some(root_geometry) = self.space.element_geometry(&window) else {
-            return positioner.get_geometry();
+            return fallback();
         };
 
-        // Positioner coordinates are relative to the immediate parent surface,
-        // including any popup ancestors. Convert the output bounds to that space.
-        let parent_origin = root_geometry.loc + get_popup_toplevel_coords(&popup);
+        // Sum ancestor popup positions with widened arithmetic: the Smithay
+        // helper uses i32 addition, while client supplied geometry is untrusted.
+        let mut parent = surface.get_parent_surface();
+        let mut popup_x = 0_i64;
+        let mut popup_y = 0_i64;
+        while let Some(parent_surface) = parent {
+            if get_role(&parent_surface) != Some(XDG_POPUP_ROLE) {
+                break;
+            }
+            let Some((loc, next_parent)) = with_states(&parent_surface, |states| {
+                let attributes = states.data_map.get::<XdgPopupSurfaceData>()?.lock().ok()?;
+                Some((attributes.current.geometry.loc, attributes.parent.clone()?))
+            }) else {
+                return fallback();
+            };
+            popup_x += i64::from(loc.x);
+            popup_y += i64::from(loc.y);
+            parent = Some(next_parent);
+        }
+
+        // A layer-shell root is not in Space. Its layer geometry includes the
+        // full surface-tree bounding box, so remove that offset to recover the
+        // root surface's origin (also when a subsurface extends left/up).
+        let root_origin = self
+            .window_for_surface(&root)
+            .and_then(|window| {
+                self.space
+                    .element_geometry(&window)
+                    .map(|geometry| geometry.loc)
+            })
+            .map(|loc| (i64::from(loc.x), i64::from(loc.y)))
+            .or_else(|| {
+                self.shell_surfaces
+                    .iter()
+                    .find(|entry| entry.mapped && entry.layer.wl_surface() == &root)
+                    .and_then(|entry| {
+                        let map = layer_map_for_output(&entry.output);
+                        let geometry = map.layer_geometry(&entry.layer)?;
+                        let bbox = entry.layer.bbox();
+                        Some((
+                            i64::from(geometry.loc.x) - i64::from(bbox.loc.x),
+                            i64::from(geometry.loc.y) - i64::from(bbox.loc.y),
+                        ))
+                    })
+            });
+        let Some((root_x, root_y)) = root_origin else {
+            return fallback();
+        };
+        let parent_origin = (root_x + popup_x, root_y + popup_y);
         let anchor = positioner.anchor_rect;
         let anchor_center = (
-            (parent_origin.x + anchor.loc.x + anchor.size.w / 2) as f64,
-            (parent_origin.y + anchor.loc.y + anchor.size.h / 2) as f64,
+            (parent_origin.0 + i64::from(anchor.loc.x) + i64::from(anchor.size.w) / 2) as f64,
+            (parent_origin.1 + i64::from(anchor.loc.y) + i64::from(anchor.size.h) / 2) as f64,
         );
         let output = self
             .space
@@ -336,12 +602,15 @@ impl Villain {
             .or_else(|| self.space.outputs().next());
         let Some(output_bounds) = output.and_then(|output| self.space.output_geometry(output))
         else {
-            return positioner.get_geometry();
+            return fallback();
         };
-        let target =
-            smithay::utils::Rectangle::new(output_bounds.loc - parent_origin, output_bounds.size);
-
-        positioner.get_unconstrained_geometry(target)
+        let target = [
+            i64::from(output_bounds.loc.x) - parent_origin.0,
+            i64::from(output_bounds.loc.y) - parent_origin.1,
+            i64::from(output_bounds.size.w),
+            i64::from(output_bounds.size.h),
+        ];
+        safe_popup_geometry(positioner, Some(target)).unwrap_or_else(fallback)
     }
 }
 
@@ -507,6 +776,61 @@ impl XdgShellHandler for Villain {
                 smithay::input::pointer::Focus::Keep,
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod popup_geometry_tests {
+    use super::*;
+    use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_positioner::{
+        Anchor, ConstraintAdjustment, Gravity,
+    };
+
+    #[test]
+    fn safe_geometry_matches_smithay_for_normal_positioners() {
+        let positioner = PositionerState {
+            rect_size: (220, 160).into(),
+            anchor_rect: smithay::utils::Rectangle::new((90, 80).into(), (20, 12).into()),
+            anchor_edges: Anchor::BottomRight,
+            gravity: Gravity::BottomRight,
+            offset: (8, 6).into(),
+            constraint_adjustment: ConstraintAdjustment::FlipX
+                | ConstraintAdjustment::FlipY
+                | ConstraintAdjustment::SlideX
+                | ConstraintAdjustment::SlideY
+                | ConstraintAdjustment::ResizeX
+                | ConstraintAdjustment::ResizeY,
+            ..PositionerState::default()
+        };
+        let target = smithay::utils::Rectangle::new((-40, -30).into(), (200, 180).into());
+        assert_eq!(
+            safe_popup_geometry(
+                positioner,
+                Some([
+                    i64::from(target.loc.x),
+                    i64::from(target.loc.y),
+                    i64::from(target.size.w),
+                    i64::from(target.size.h),
+                ])
+            ),
+            Some(positioner.get_unconstrained_geometry(target))
+        );
+    }
+
+    #[test]
+    fn extreme_positioner_values_are_rejected_without_overflow() {
+        let positioner = PositionerState {
+            rect_size: (i32::MAX, i32::MAX).into(),
+            anchor_rect: smithay::utils::Rectangle::new(
+                (i32::MAX, i32::MAX).into(),
+                (i32::MAX, i32::MAX).into(),
+            ),
+            anchor_edges: Anchor::BottomRight,
+            gravity: Gravity::Left,
+            offset: (i32::MAX, i32::MAX).into(),
+            ..PositionerState::default()
+        };
+        assert!(safe_popup_geometry_unconstrained(positioner).is_none());
     }
 }
 
