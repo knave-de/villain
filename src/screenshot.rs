@@ -442,47 +442,6 @@ fn crop_pixels(
     Ok(((width as i32, height as i32).into(), pixels))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn gestures_suppressed_by_screenshot_selection_stay_suppressed_until_end() {
-        let mut screenshot = ScreenshotState::default();
-        screenshot.intercepted_buttons.insert(BTN_LEFT);
-
-        assert!(!screenshot.begin_pinch_gesture());
-        assert!(!screenshot.update_pinch_gesture());
-        screenshot.intercepted_buttons.clear();
-        assert!(!screenshot.update_pinch_gesture());
-        assert!(!screenshot.end_pinch_gesture());
-
-        screenshot.intercepted_buttons.insert(BTN_LEFT);
-        assert!(!screenshot.begin_hold_gesture());
-        assert!(!screenshot.update_hold_gesture());
-        screenshot.intercepted_buttons.clear();
-        assert!(!screenshot.update_hold_gesture());
-        assert!(!screenshot.end_hold_gesture());
-        screenshot.clear_gesture_streams();
-        assert!(screenshot.begin_hold_gesture());
-        assert!(screenshot.end_hold_gesture());
-    }
-
-    #[test]
-    fn forwarded_gesture_is_detected_while_active() {
-        let mut screenshot = ScreenshotState::default();
-        assert!(screenshot.begin_pinch_gesture());
-        assert!(screenshot.has_forwarded_gesture());
-        assert!(screenshot.end_pinch_gesture());
-        assert!(!screenshot.has_forwarded_gesture());
-
-        assert!(screenshot.begin_hold_gesture());
-        assert!(screenshot.has_forwarded_gesture());
-        assert!(screenshot.end_hold_gesture());
-        assert!(!screenshot.has_forwarded_gesture());
-    }
-}
-
 fn encode_png(width: u32, height: u32, pixels: &[u8]) -> Result<Vec<u8>, String> {
     let mut encoded = Vec::new();
     let mut encoder = png::Encoder::new(&mut encoded, width, height);
@@ -639,4 +598,45 @@ pub(crate) fn send_selection(
         io: io_token,
         timeout,
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gestures_suppressed_by_screenshot_selection_stay_suppressed_until_end() {
+        let mut screenshot = ScreenshotState::default();
+        screenshot.intercepted_buttons.insert(BTN_LEFT);
+
+        assert!(!screenshot.begin_pinch_gesture());
+        assert!(!screenshot.update_pinch_gesture());
+        screenshot.intercepted_buttons.clear();
+        assert!(!screenshot.update_pinch_gesture());
+        assert!(!screenshot.end_pinch_gesture());
+
+        screenshot.intercepted_buttons.insert(BTN_LEFT);
+        assert!(!screenshot.begin_hold_gesture());
+        assert!(!screenshot.update_hold_gesture());
+        screenshot.intercepted_buttons.clear();
+        assert!(!screenshot.update_hold_gesture());
+        assert!(!screenshot.end_hold_gesture());
+        screenshot.clear_gesture_streams();
+        assert!(screenshot.begin_hold_gesture());
+        assert!(screenshot.end_hold_gesture());
+    }
+
+    #[test]
+    fn forwarded_gesture_is_detected_while_active() {
+        let mut screenshot = ScreenshotState::default();
+        assert!(screenshot.begin_pinch_gesture());
+        assert!(screenshot.has_forwarded_gesture());
+        assert!(screenshot.end_pinch_gesture());
+        assert!(!screenshot.has_forwarded_gesture());
+
+        assert!(screenshot.begin_hold_gesture());
+        assert!(screenshot.has_forwarded_gesture());
+        assert!(screenshot.end_hold_gesture());
+        assert!(!screenshot.has_forwarded_gesture());
+    }
 }
