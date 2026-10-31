@@ -73,6 +73,10 @@ struct Transfer {
 pub(crate) struct ScreenshotState {
     selection: Option<Selection>,
     intercepted_buttons: std::collections::HashSet<u32>,
+    pinch_gesture_active: bool,
+    pinch_gesture_suppressed: bool,
+    hold_gesture_active: bool,
+    hold_gesture_suppressed: bool,
     transfers: Vec<Transfer>,
     next_transfer_id: u64,
     notifications: crate::screenshot_notification::ScreenshotNotifier,
@@ -89,6 +93,58 @@ impl ScreenshotState {
 
     pub(crate) fn clear_intercepted_buttons(&mut self) {
         self.intercepted_buttons.clear();
+    }
+
+    pub(crate) fn begin_pinch_gesture(&mut self) -> bool {
+        if self.pinch_gesture_active {
+            return false;
+        }
+        self.pinch_gesture_active = true;
+        self.pinch_gesture_suppressed = self.intercepting_pointer();
+        !self.pinch_gesture_suppressed
+    }
+
+    pub(crate) fn update_pinch_gesture(&self) -> bool {
+        self.pinch_gesture_active && !self.pinch_gesture_suppressed && !self.intercepting_pointer()
+    }
+
+    pub(crate) fn end_pinch_gesture(&mut self) -> bool {
+        let forward = self.update_pinch_gesture();
+        self.pinch_gesture_active = false;
+        self.pinch_gesture_suppressed = false;
+        forward
+    }
+
+    pub(crate) fn begin_hold_gesture(&mut self) -> bool {
+        if self.hold_gesture_active {
+            return false;
+        }
+        self.hold_gesture_active = true;
+        self.hold_gesture_suppressed = self.intercepting_pointer();
+        !self.hold_gesture_suppressed
+    }
+
+    pub(crate) fn update_hold_gesture(&self) -> bool {
+        self.hold_gesture_active && !self.hold_gesture_suppressed && !self.intercepting_pointer()
+    }
+
+    pub(crate) fn end_hold_gesture(&mut self) -> bool {
+        let forward = self.update_hold_gesture();
+        self.hold_gesture_active = false;
+        self.hold_gesture_suppressed = false;
+        forward
+    }
+
+    pub(crate) fn clear_gesture_streams(&mut self) {
+        self.pinch_gesture_active = false;
+        self.pinch_gesture_suppressed = false;
+        self.hold_gesture_active = false;
+        self.hold_gesture_suppressed = false;
+    }
+
+    fn has_forwarded_gesture(&self) -> bool {
+        (self.pinch_gesture_active && !self.pinch_gesture_suppressed)
+            || (self.hold_gesture_active && !self.hold_gesture_suppressed)
     }
 
     pub(crate) fn background(&self) -> Option<&MemoryRenderBuffer> {
@@ -134,6 +190,9 @@ pub(crate) fn begin(
         return Err("a screenshot selection is already active".into());
     }
     if !state.pressed_buttons.is_empty() {
+        return Err("finish the current pointer gesture before taking a screenshot".into());
+    }
+    if state.screenshot.has_forwarded_gesture() {
         return Err("finish the current pointer gesture before taking a screenshot".into());
     }
 
@@ -539,4 +598,45 @@ pub(crate) fn send_selection(
         io: io_token,
         timeout,
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gestures_suppressed_by_screenshot_selection_stay_suppressed_until_end() {
+        let mut screenshot = ScreenshotState::default();
+        screenshot.intercepted_buttons.insert(BTN_LEFT);
+
+        assert!(!screenshot.begin_pinch_gesture());
+        assert!(!screenshot.update_pinch_gesture());
+        screenshot.intercepted_buttons.clear();
+        assert!(!screenshot.update_pinch_gesture());
+        assert!(!screenshot.end_pinch_gesture());
+
+        screenshot.intercepted_buttons.insert(BTN_LEFT);
+        assert!(!screenshot.begin_hold_gesture());
+        assert!(!screenshot.update_hold_gesture());
+        screenshot.intercepted_buttons.clear();
+        assert!(!screenshot.update_hold_gesture());
+        assert!(!screenshot.end_hold_gesture());
+        screenshot.clear_gesture_streams();
+        assert!(screenshot.begin_hold_gesture());
+        assert!(screenshot.end_hold_gesture());
+    }
+
+    #[test]
+    fn forwarded_gesture_is_detected_while_active() {
+        let mut screenshot = ScreenshotState::default();
+        assert!(screenshot.begin_pinch_gesture());
+        assert!(screenshot.has_forwarded_gesture());
+        assert!(screenshot.end_pinch_gesture());
+        assert!(!screenshot.has_forwarded_gesture());
+
+        assert!(screenshot.begin_hold_gesture());
+        assert!(screenshot.has_forwarded_gesture());
+        assert!(screenshot.end_hold_gesture());
+        assert!(!screenshot.has_forwarded_gesture());
+    }
 }

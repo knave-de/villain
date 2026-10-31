@@ -360,6 +360,9 @@ Override entries under `[[compositor.gesture.bind]]` by fingers and direction;
 `action = "none"` disables the matching compositor gesture. These are Villain
 actions, not knavectl commands. Reload applies validated changes atomically.
 
+Other libinput pointer gestures pass through to the focused client: pinch
+forwards scale, center movement and rotation, while hold forwards begin/end.
+
 To skip empty slots when cycling with next/previous shortcuts or swipes, set
 `skip_empty = true` under `[compositor.workspace]` and reload. It defaults to
 false; number shortcuts and bar clicks reach predefined slots and the existing

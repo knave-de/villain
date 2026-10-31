@@ -359,6 +359,7 @@ fn process_input(event: InputEvent<LibinputInputBackend>, state: &mut Villain) {
         }
         InputEvent::DeviceRemoved { device } => {
             state.release_pointer_buttons();
+            state.screenshot.clear_gesture_streams();
             state.swipe_device_removed(&smithay::backend::input::Device::id(&device));
             if let Some(tty) = state.tty.as_mut() {
                 tty.input_devices.retain(|candidate| candidate != &device);
@@ -460,6 +461,81 @@ fn process_input(event: InputEvent<LibinputInputBackend>, state: &mut Villain) {
         InputEvent::GestureSwipeEnd { event } => {
             use smithay::backend::input::{Device, GestureEndEvent};
             state.swipe_end(&event.device().id(), event.cancelled(), event.time_msec());
+        }
+        InputEvent::GesturePinchBegin { event } => {
+            if !state.screenshot.begin_pinch_gesture() {
+                return;
+            }
+            use smithay::backend::input::GestureBeginEvent;
+            state.pointer.clone().gesture_pinch_begin(
+                state,
+                &smithay::input::pointer::GesturePinchBeginEvent {
+                    serial: SERIAL_COUNTER.next_serial(),
+                    time: event.time_msec(),
+                    fingers: event.fingers(),
+                },
+            );
+        }
+        InputEvent::GesturePinchUpdate { event } => {
+            if !state.screenshot.update_pinch_gesture() {
+                return;
+            }
+            use smithay::backend::input::GesturePinchUpdateEvent;
+            state.pointer.clone().gesture_pinch_update(
+                state,
+                &smithay::input::pointer::GesturePinchUpdateEvent {
+                    time: event.time_msec(),
+                    delta: (
+                        event.delta_x() / state.config.output_scale,
+                        event.delta_y() / state.config.output_scale,
+                    )
+                        .into(),
+                    scale: event.scale(),
+                    rotation: event.rotation(),
+                },
+            );
+        }
+        InputEvent::GesturePinchEnd { event } => {
+            if !state.screenshot.end_pinch_gesture() {
+                return;
+            }
+            use smithay::backend::input::GestureEndEvent;
+            state.pointer.clone().gesture_pinch_end(
+                state,
+                &smithay::input::pointer::GesturePinchEndEvent {
+                    serial: SERIAL_COUNTER.next_serial(),
+                    time: event.time_msec(),
+                    cancelled: event.cancelled(),
+                },
+            );
+        }
+        InputEvent::GestureHoldBegin { event } => {
+            if !state.screenshot.begin_hold_gesture() {
+                return;
+            }
+            use smithay::backend::input::GestureBeginEvent;
+            state.pointer.clone().gesture_hold_begin(
+                state,
+                &smithay::input::pointer::GestureHoldBeginEvent {
+                    serial: SERIAL_COUNTER.next_serial(),
+                    time: event.time_msec(),
+                    fingers: event.fingers(),
+                },
+            );
+        }
+        InputEvent::GestureHoldEnd { event } => {
+            if !state.screenshot.end_hold_gesture() {
+                return;
+            }
+            use smithay::backend::input::GestureEndEvent;
+            state.pointer.clone().gesture_hold_end(
+                state,
+                &smithay::input::pointer::GestureHoldEndEvent {
+                    serial: SERIAL_COUNTER.next_serial(),
+                    time: event.time_msec(),
+                    cancelled: event.cancelled(),
+                },
+            );
         }
         _ => {}
     }

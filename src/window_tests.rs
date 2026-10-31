@@ -30,6 +30,8 @@ struct Client {
     configures: HashMap<usize, Configure>,
     pointer_buttons: usize,
     swipes: Vec<String>,
+    pinches: Vec<String>,
+    holds: Vec<String>,
     keyboard_modifiers: Vec<u32>,
     keyboard_keys: Vec<u32>,
     keyboard_enters: Vec<(wl_surface::WlSurface, Vec<u8>)>,
@@ -126,9 +128,53 @@ impl Dispatch<wl_pointer::WlPointer, ()> for Client {
     }
 }
 use wayland_protocols::wp::pointer_gestures::zv1::client::{
-    zwp_pointer_gesture_swipe_v1, zwp_pointer_gestures_v1,
+    zwp_pointer_gesture_hold_v1, zwp_pointer_gesture_pinch_v1, zwp_pointer_gesture_swipe_v1,
+    zwp_pointer_gestures_v1,
 };
 delegate_noop!(Client: ignore zwp_pointer_gestures_v1::ZwpPointerGesturesV1);
+impl Dispatch<zwp_pointer_gesture_pinch_v1::ZwpPointerGesturePinchV1, ()> for Client {
+    fn event(
+        state: &mut Self,
+        _: &zwp_pointer_gesture_pinch_v1::ZwpPointerGesturePinchV1,
+        event: zwp_pointer_gesture_pinch_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        use zwp_pointer_gesture_pinch_v1::Event;
+        state.pinches.push(
+            match event {
+                Event::Begin { .. } => "begin",
+                Event::Update { .. } => "update",
+                Event::End { cancelled: 0, .. } => "end",
+                Event::End { .. } => "cancel",
+                _ => "other",
+            }
+            .into(),
+        );
+    }
+}
+impl Dispatch<zwp_pointer_gesture_hold_v1::ZwpPointerGestureHoldV1, ()> for Client {
+    fn event(
+        state: &mut Self,
+        _: &zwp_pointer_gesture_hold_v1::ZwpPointerGestureHoldV1,
+        event: zwp_pointer_gesture_hold_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        use zwp_pointer_gesture_hold_v1::Event;
+        state.holds.push(
+            match event {
+                Event::Begin { .. } => "begin",
+                Event::End { cancelled: 0, .. } => "end",
+                Event::End { .. } => "cancel",
+                _ => "other",
+            }
+            .into(),
+        );
+    }
+}
 impl Dispatch<zwp_pointer_gesture_swipe_v1::ZwpPointerGestureSwipeV1, ()> for Client {
     fn event(
         state: &mut Self,
@@ -322,6 +368,8 @@ fn wayland_floating_and_fullscreen_requests() {
         let gestures: zwp_pointer_gestures_v1::ZwpPointerGesturesV1 =
             globals.bind(&qh, 1..=3, ()).unwrap();
         let _swipe = gestures.get_swipe_gesture(&pointer, &qh, ());
+        let _pinch = gestures.get_pinch_gesture(&pointer, &qh, ());
+        let _hold = gestures.get_hold_gesture(&pointer, &qh, ());
         let path =
             std::env::temp_dir().join(format!("villain-split-buffer-{}", std::process::id()));
         let file = std::fs::OpenOptions::new()
@@ -361,6 +409,52 @@ fn wayland_floating_and_fullscreen_requests() {
         settle(&mut queue, &mut client);
         assert_eq!(client.swipes, ["begin", "update", "end"]);
         client.swipes.clear();
+        inspect(&sender, |s| {
+            s.pointer.clone().gesture_pinch_begin(
+                s,
+                &smithay::input::pointer::GesturePinchBeginEvent {
+                    serial: SERIAL_COUNTER.next_serial(),
+                    time: 4,
+                    fingers: 2,
+                },
+            );
+            s.pointer.clone().gesture_pinch_update(
+                s,
+                &smithay::input::pointer::GesturePinchUpdateEvent {
+                    time: 5,
+                    delta: (3.0, 4.0).into(),
+                    scale: 1.25,
+                    rotation: 8.0,
+                },
+            );
+            s.pointer.clone().gesture_pinch_end(
+                s,
+                &smithay::input::pointer::GesturePinchEndEvent {
+                    serial: SERIAL_COUNTER.next_serial(),
+                    time: 6,
+                    cancelled: false,
+                },
+            );
+            s.pointer.clone().gesture_hold_begin(
+                s,
+                &smithay::input::pointer::GestureHoldBeginEvent {
+                    serial: SERIAL_COUNTER.next_serial(),
+                    time: 7,
+                    fingers: 3,
+                },
+            );
+            s.pointer.clone().gesture_hold_end(
+                s,
+                &smithay::input::pointer::GestureHoldEndEvent {
+                    serial: SERIAL_COUNTER.next_serial(),
+                    time: 8,
+                    cancelled: false,
+                },
+            );
+        });
+        settle(&mut queue, &mut client);
+        assert_eq!(client.pinches, ["begin", "update", "end"]);
+        assert_eq!(client.holds, ["begin", "end"]);
         inspect(&sender, |s| {
             s.swipe_begin("test".into(), 3, 4);
             s.swipe_update("test", -60.0, 0.0, 5);
