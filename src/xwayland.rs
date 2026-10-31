@@ -101,6 +101,15 @@ pub fn init(event_loop: &mut EventLoop<'static, Villain>, state: &mut Villain) {
                     .config
                     .environment
                     .insert("DISPLAY".into(), format!(":{display_number}"));
+                let screenshot_selection_is_active = current_data_device_selection_userdata(&state.seat)
+                    .is_some_and(|payload| {
+                        matches!(&*payload, crate::screenshot::SelectionPayload::Png(_))
+                    });
+                if screenshot_selection_is_active
+                    && let Err(error) = crate::screenshot::announce_screenshot_clipboard_to_xwayland(state)
+                {
+                    tracing::warn!(%error, "could not announce existing screenshot clipboard to XWayland");
+                }
                 if state.owns_session {
                     crate::session::activate(state, false);
                 }
@@ -440,6 +449,78 @@ mod tests {
             }
             state.display_handle.flush_clients().unwrap();
         }
+    }
+
+    /// Uses a private, headless compositor and a real XWayland server. Run with
+    /// an isolated XDG_RUNTIME_DIR; no desktop session or GPU is required.
+    #[test]
+    #[ignore = "requires Xwayland and an isolated XDG_RUNTIME_DIR"]
+    fn xwayland_ready_announces_existing_screenshot_clipboard() {
+        let mut event_loop = EventLoop::try_new().unwrap();
+        let mut state = Villain::new(
+            &mut event_loop,
+            Display::new().unwrap(),
+            crate::config::RuntimeConfig::load().unwrap(),
+        );
+        let output = smithay::output::Output::new(
+            "test".into(),
+            smithay::output::PhysicalProperties {
+                size: (0, 0).into(),
+                subpixel: smithay::output::Subpixel::Unknown,
+                make: "test".into(),
+                model: "test".into(),
+            },
+        );
+        output.create_global::<Villain>(&state.display_handle);
+        let mode = smithay::output::Mode {
+            size: (800, 600).into(),
+            refresh: 60_000,
+        };
+        output.change_current_state(Some(mode), None, None, Some((0, 0).into()));
+        output.set_preferred(mode);
+        state.space.map_output(&output, (0, 0));
+        smithay::wayland::selection::data_device::set_data_device_selection::<Villain>(
+            &state.display_handle,
+            &state.seat,
+            vec!["image/png".into()],
+            crate::screenshot::SelectionPayload::Png(std::sync::Arc::from([1, 2, 3])),
+        );
+
+        init(&mut event_loop, &mut state);
+        pump_until(&mut event_loop, &mut state, |state| {
+            state.xwayland_display.is_some()
+        });
+        let display = format!(":{}", state.xwayland_display.unwrap());
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            sender
+                .send(smithay::reexports::x11rb::connect(Some(&display)))
+                .unwrap()
+        });
+        let mut connection = None;
+        pump_until(&mut event_loop, &mut state, |_| {
+            connection = receiver.try_recv().ok();
+            connection.is_some()
+        });
+        let (conn, screen) = connection.unwrap().unwrap();
+        let clipboard_atom = conn
+            .intern_atom(false, b"CLIPBOARD")
+            .unwrap()
+            .reply()
+            .unwrap()
+            .atom;
+        pump_until(&mut event_loop, &mut state, |_| {
+            conn.get_selection_owner(clipboard_atom)
+                .unwrap()
+                .reply()
+                .unwrap()
+                .owner
+                != smithay::reexports::x11rb::NONE
+        });
+        assert_ne!(
+            conn.setup().roots[screen].root,
+            smithay::reexports::x11rb::NONE
+        );
     }
 
     /// Uses a private, headless compositor and a real XWayland server. Run with

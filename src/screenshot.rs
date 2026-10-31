@@ -360,11 +360,10 @@ pub(crate) fn announce_screenshot_clipboard_to_xwayland(state: &mut Villain) -> 
         Some(vec![IMAGE_MIME.to_owned()]),
     )
     .map_err(|error| error.to_string())?;
-    // Smithay queues the owner change; this round trip flushes it so X11 apps
-    // can request the screenshot immediately after the shortcut completes.
-    xwm.get_randr_primary_output()
-        .map(|_| ())
-        .map_err(|error| error.to_string())
+    // Do not wait for an unrelated X11 reply on the compositor event loop.
+    // Smithay queues the owner change and its XWayland source flushes queued
+    // requests as part of the normal event-loop cycle.
+    Ok(())
 }
 
 fn crop_pixels(
