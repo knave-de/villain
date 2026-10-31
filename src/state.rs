@@ -100,6 +100,8 @@ pub struct Villain {
     pub wlr_data_control_state: wlr_data_control::DataControlState,
     pub ext_data_control_state: ext_data_control::DataControlState,
     pub keyboard_shortcuts_inhibit_state: KeyboardShortcutsInhibitState,
+    pub virtual_keyboard_manager_state:
+        smithay::wayland::virtual_keyboard::VirtualKeyboardManagerState,
     #[allow(dead_code)]
     pub cursor_shape_state: CursorShapeManagerState,
     #[allow(dead_code)]
@@ -167,6 +169,11 @@ impl Villain {
             Some(&primary_selection_state),
             |_| true,
         );
+        let virtual_keyboard_manager_state =
+            smithay::wayland::virtual_keyboard::VirtualKeyboardManagerState::new::<Self, _>(
+                &display_handle,
+                |_| true,
+            );
         let mut seat_state = SeatState::new();
         let mut seat = seat_state.new_wl_seat(&display_handle, "villain");
         let keyboard = seat
@@ -241,6 +248,7 @@ impl Villain {
             keyboard_shortcuts_inhibit_state: KeyboardShortcutsInhibitState::new::<Self>(
                 &display_handle,
             ),
+            virtual_keyboard_manager_state,
             cursor_shape_state: CursorShapeManagerState::new::<Self>(&display_handle),
             output_manager_state: OutputManagerState::new_with_xdg_output::<Self>(&display_handle),
             fractional_scale_manager_state: FractionalScaleManagerState::new::<Self>(

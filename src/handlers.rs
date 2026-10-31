@@ -792,6 +792,7 @@ smithay::delegate_fractional_scale!(Villain);
 smithay::delegate_viewporter!(Villain);
 smithay::delegate_primary_selection!(Villain);
 smithay::delegate_seat!(Villain);
+smithay::delegate_virtual_keyboard_manager!(Villain);
 smithay::delegate_pointer_gestures!(Villain);
 smithay::delegate_shm!(Villain);
 smithay::delegate_xdg_shell!(Villain);
