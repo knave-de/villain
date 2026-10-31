@@ -117,6 +117,42 @@ impl KeybindRegistry {
         Ok(trigger)
     }
 
+    pub(crate) fn replace_global(
+        &mut self,
+        configured: &Self,
+        app_id: &str,
+        session_handle: &str,
+        shortcut_id: &str,
+        trigger: &str,
+        modkey: &str,
+    ) -> Result<String, String> {
+        let index = self.bindings.iter().position(|binding| {
+            matches!(&binding.dispatch, Dispatch::GlobalShortcutActivated { app_id: owner, session_handle: session, shortcut_id: id } if owner == app_id && session == session_handle && id == shortcut_id)
+        }).ok_or_else(|| "global shortcut is not registered".to_string())?;
+        let modkey = parse_modkey(modkey)?;
+        let key = parse_portal_trigger(trigger, modkey)?;
+        let reserved = key == parse_portal_trigger("CTRL+ALT+BACKSPACE", modkey)?
+            || (1..=12).any(|number| {
+                parse_portal_trigger(&format!("CTRL+ALT+F{number}"), modkey)
+                    .is_ok_and(|reserved| key == reserved)
+            });
+        if reserved
+            || configured
+                .bindings
+                .iter()
+                .any(|binding| binding.keys == key)
+            || self
+                .bindings
+                .iter()
+                .enumerate()
+                .any(|(other_index, binding)| other_index != index && binding.keys == key)
+        {
+            return Err("global shortcut trigger conflicts with an existing binding".into());
+        }
+        self.bindings[index].keys = key;
+        Ok(canonical_portal_trigger(trigger))
+    }
+
     pub(crate) fn unregister_global(
         &mut self,
         app_id: &str,
@@ -770,6 +806,53 @@ pub(crate) fn handle_keyboard_key(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn global_shortcut_replacement_is_atomic_on_conflict() {
+        let configured = KeybindRegistry::defaults("Super").unwrap();
+        let mut globals = KeybindRegistry::empty();
+        globals
+            .register_global(
+                "app.one".into(),
+                "/session/one".into(),
+                "toggle".into(),
+                "CTRL+F9",
+                "Super",
+            )
+            .unwrap();
+        globals
+            .register_global(
+                "app.two".into(),
+                "/session/two".into(),
+                "toggle".into(),
+                "CTRL+F10",
+                "Super",
+            )
+            .unwrap();
+        assert!(
+            globals
+                .replace_global(
+                    &configured,
+                    "app.one",
+                    "/session/one",
+                    "toggle",
+                    "CTRL+F10",
+                    "Super"
+                )
+                .is_err()
+        );
+        assert_eq!(
+            globals.replace_global(
+                &configured,
+                "app.one",
+                "/session/one",
+                "toggle",
+                "CTRL+F11",
+                "Super"
+            ),
+            Ok("CTRL+F11".into())
+        );
+    }
 
     #[test]
     fn mouse_bindings_use_modkey_and_can_be_overridden() {

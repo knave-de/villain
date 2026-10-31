@@ -446,6 +446,12 @@ impl Villain {
                 shortcut_id,
                 trigger,
             } => self.register_global_shortcut(app_id, session_handle, shortcut_id, trigger),
+            DesktopRequest::ReplaceGlobalShortcut {
+                app_id,
+                session_handle,
+                shortcut_id,
+                trigger,
+            } => self.replace_global_shortcut(app_id, session_handle, shortcut_id, trigger),
             DesktopRequest::UnregisterGlobalShortcut {
                 app_id,
                 session_handle,
@@ -503,6 +509,36 @@ impl Villain {
                     component: format!("villain {}", env!("CARGO_PKG_VERSION")),
                 },
             },
+        }
+    }
+
+    fn replace_global_shortcut(
+        &mut self,
+        app_id: String,
+        session_handle: String,
+        shortcut_id: String,
+        trigger: String,
+    ) -> DesktopResponse {
+        if app_id.is_empty()
+            || app_id.len() > 255
+            || session_handle.is_empty()
+            || session_handle.len() > 255
+            || shortcut_id.is_empty()
+            || shortcut_id.len() > 128
+            || trigger.len() > 64
+        {
+            return invalid_request("global shortcut field exceeds its size limit".into());
+        }
+        match self.global_keybinds.replace_global(
+            &self.config.keybinds,
+            &app_id,
+            &session_handle,
+            &shortcut_id,
+            &trigger,
+            "Super",
+        ) {
+            Ok(trigger) => DesktopResponse::GlobalShortcutRegistered { trigger },
+            Err(error) => invalid_request(error),
         }
     }
 
