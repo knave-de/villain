@@ -491,6 +491,8 @@ args = ["bemenu"]
         fs::write(
             &path,
             r#"
+[compositor.workspace]
+predefined = 3
 [[compositor.window_rules.application]]
 app_id = "firefox"
 workspace = 3
