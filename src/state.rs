@@ -169,10 +169,11 @@ impl Villain {
             Some(&primary_selection_state),
             |_| true,
         );
+        let allow_virtual_keyboard = config.input.allow_virtual_keyboard;
         let virtual_keyboard_manager_state =
             smithay::wayland::virtual_keyboard::VirtualKeyboardManagerState::new::<Self, _>(
                 &display_handle,
-                |_| true,
+                move |_| allow_virtual_keyboard,
             );
         let mut seat_state = SeatState::new();
         let mut seat = seat_state.new_wl_seat(&display_handle, "villain");
