@@ -9,7 +9,7 @@ use std::{
 };
 use wayland_client::{
     Connection, Dispatch, QueueHandle, delegate_noop,
-    globals::{GlobalListContents, registry_queue_init},
+    globals::{GlobalList, GlobalListContents, registry_queue_init},
     protocol::{
         wl_buffer, wl_compositor, wl_keyboard, wl_pointer, wl_registry, wl_seat, wl_shm,
         wl_shm_pool, wl_surface,
@@ -258,6 +258,11 @@ fn inspect(sender: &mpsc::Sender<Inspect>, f: impl FnOnce(&mut Villain) + Send +
         }))
         .unwrap();
     receive.recv_timeout(Duration::from_secs(5)).unwrap();
+}
+fn has_global(globals: &GlobalList, interface: &str) -> bool {
+    globals
+        .contents()
+        .with_list(|entries| entries.iter().any(|entry| entry.interface == interface))
 }
 fn find(state: &Villain, app: &str) -> WindowInfo {
     state
@@ -600,33 +605,13 @@ fn wayland_floating_and_fullscreen_requests() {
             // Defaults reload without overwriting a workspace's manual choice.
             let path = knave_config::ConfigDocument::default_path().unwrap();
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-            assert!(
-                s.virtual_keyboard_allowed
-                    .load(std::sync::atomic::Ordering::Relaxed)
-            );
-            std::fs::write(
-                &path,
-                "[compositor]\nmaster_percent = 60\n[compositor.input]\nallow_virtual_keyboard = false\n",
-            )
-            .unwrap();
+            std::fs::write(&path, "[compositor]\nmaster_percent = 60\n").unwrap();
             s.dispatch(Dispatch::ReloadConfig).unwrap();
             assert_eq!(s.master_ratio(0), 6000);
-            assert!(
-                !s.virtual_keyboard_allowed
-                    .load(std::sync::atomic::Ordering::Relaxed)
-            );
             s.dispatch(Dispatch::ResizeMaster(5)).unwrap();
-            std::fs::write(
-                &path,
-                "[compositor]\nmaster_percent = 70\n[compositor.input]\nallow_virtual_keyboard = true\n",
-            )
-            .unwrap();
+            std::fs::write(&path, "[compositor]\nmaster_percent = 70\n").unwrap();
             s.dispatch(Dispatch::ReloadConfig).unwrap();
             assert_eq!(s.master_ratio(0), 6500);
-            assert!(
-                s.virtual_keyboard_allowed
-                    .load(std::sync::atomic::Ordering::Relaxed)
-            );
             s.dispatch(Dispatch::ResetMaster).unwrap();
             assert_eq!(s.master_ratio(0), 7000);
             std::fs::remove_file(path).unwrap();
@@ -1554,6 +1539,88 @@ fn keyboard_shortcuts_inhibitor_forwards_binding_keys() {
         state.display_handle.flush_clients().unwrap();
     }
     thread.join().unwrap();
+}
+
+#[test]
+#[ignore = "requires a private XDG_RUNTIME_DIR"]
+fn virtual_keyboard_global_tracks_policy_reloads_for_existing_registry() {
+    const VIRTUAL_KEYBOARD_MANAGER: &str = "zwp_virtual_keyboard_manager_v1";
+
+    let mut event_loop = EventLoop::try_new().unwrap();
+    let mut state = Villain::new(
+        &mut event_loop,
+        Display::new().unwrap(),
+        crate::config::RuntimeConfig::load().unwrap(),
+    );
+    let path = knave_config::ConfigDocument::default_path().unwrap();
+    let (server, client) = UnixStream::pair().unwrap();
+    state
+        .display_handle
+        .insert_client(server, Arc::new(crate::state::ClientState::default()))
+        .unwrap();
+    let cleanup_path = path.clone();
+    let (sender, requests) = mpsc::channel::<Inspect>();
+    let thread = std::thread::spawn(move || {
+        let conn = Connection::from_socket(client).unwrap();
+        let (globals, mut queue) = registry_queue_init::<Client>(&conn).unwrap();
+        assert!(has_global(&globals, VIRTUAL_KEYBOARD_MANAGER));
+
+        let disable_path = path.clone();
+        inspect(&sender, move |state| {
+            std::fs::create_dir_all(disable_path.parent().unwrap()).unwrap();
+            std::fs::write(
+                &disable_path,
+                "[compositor.input]\nallow_virtual_keyboard = false\n",
+            )
+            .unwrap();
+            state
+                .dispatch(crate::dispatch::Dispatch::ReloadConfig)
+                .unwrap();
+            assert!(
+                !state
+                    .virtual_keyboard_allowed
+                    .load(std::sync::atomic::Ordering::Relaxed)
+            );
+        });
+        queue.roundtrip(&mut Client::default()).unwrap();
+        assert!(!has_global(&globals, VIRTUAL_KEYBOARD_MANAGER));
+
+        let enable_path = path.clone();
+        inspect(&sender, move |state| {
+            std::fs::write(
+                &enable_path,
+                "[compositor.input]\nallow_virtual_keyboard = true\n",
+            )
+            .unwrap();
+            state
+                .dispatch(crate::dispatch::Dispatch::ReloadConfig)
+                .unwrap();
+            assert!(
+                state
+                    .virtual_keyboard_allowed
+                    .load(std::sync::atomic::Ordering::Relaxed)
+            );
+        });
+        queue.roundtrip(&mut Client::default()).unwrap();
+        assert!(has_global(&globals, VIRTUAL_KEYBOARD_MANAGER));
+    });
+
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !thread.is_finished() {
+        assert!(
+            Instant::now() < deadline,
+            "virtual-keyboard policy test timed out"
+        );
+        event_loop
+            .dispatch(Duration::from_millis(2), &mut state)
+            .unwrap();
+        while let Ok(inspect) = requests.try_recv() {
+            inspect(&mut state);
+        }
+        state.display_handle.flush_clients().unwrap();
+    }
+    thread.join().unwrap();
+    let _ = std::fs::remove_file(cleanup_path);
 }
 
 #[path = "tile_tests.rs"]

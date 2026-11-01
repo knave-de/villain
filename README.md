@@ -77,7 +77,7 @@ during session startup and reload. The unreleased format has no schema version
 or root-level compatibility projection.
 
 Virtual-keyboard protocol clients are allowed by default. Set
-`[compositor.input].allow_virtual_keyboard = false` to deny all such clients;
+`allow_virtual_keyboard = false` under `[compositor.input]` to deny all such clients;
 Villain applies this policy on startup and config reload.
 
 The tracked `config.example.toml` demonstrates the `[compositor]` section of
