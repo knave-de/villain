@@ -154,6 +154,7 @@ pub struct Villain {
 }
 
 impl Villain {
+    /// Create compositor state and register its Wayland globals from the runtime config.
     pub fn new(
         event_loop: &mut EventLoop<'static, Self>,
         display: Display<Self>,

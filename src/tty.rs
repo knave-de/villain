@@ -575,6 +575,7 @@ fn configure_input_device(
 }
 
 impl Villain {
+    /// Apply configured device settings and virtual-keyboard client policy.
     pub fn apply_input_config(&mut self) {
         let global = self.config.input;
         let rules = self.config.devices.clone();
