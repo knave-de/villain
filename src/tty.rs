@@ -578,6 +578,10 @@ impl Villain {
     pub fn apply_input_config(&mut self) {
         let global = self.config.input;
         let rules = self.config.devices.clone();
+        self.virtual_keyboard_allowed.store(
+            global.allow_virtual_keyboard,
+            std::sync::atomic::Ordering::Relaxed,
+        );
         if let Some(tty) = self.tty.as_mut() {
             for device in &mut tty.input_devices {
                 configure_input_device(device, global, &rules);

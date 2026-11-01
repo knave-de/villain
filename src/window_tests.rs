@@ -600,13 +600,33 @@ fn wayland_floating_and_fullscreen_requests() {
             // Defaults reload without overwriting a workspace's manual choice.
             let path = knave_config::ConfigDocument::default_path().unwrap();
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-            std::fs::write(&path, "[compositor]\nmaster_percent = 60\n").unwrap();
+            assert!(
+                s.virtual_keyboard_allowed
+                    .load(std::sync::atomic::Ordering::Relaxed)
+            );
+            std::fs::write(
+                &path,
+                "[compositor]\nmaster_percent = 60\n[compositor.input]\nallow_virtual_keyboard = false\n",
+            )
+            .unwrap();
             s.dispatch(Dispatch::ReloadConfig).unwrap();
             assert_eq!(s.master_ratio(0), 6000);
+            assert!(
+                !s.virtual_keyboard_allowed
+                    .load(std::sync::atomic::Ordering::Relaxed)
+            );
             s.dispatch(Dispatch::ResizeMaster(5)).unwrap();
-            std::fs::write(&path, "[compositor]\nmaster_percent = 70\n").unwrap();
+            std::fs::write(
+                &path,
+                "[compositor]\nmaster_percent = 70\n[compositor.input]\nallow_virtual_keyboard = true\n",
+            )
+            .unwrap();
             s.dispatch(Dispatch::ReloadConfig).unwrap();
             assert_eq!(s.master_ratio(0), 6500);
+            assert!(
+                s.virtual_keyboard_allowed
+                    .load(std::sync::atomic::Ordering::Relaxed)
+            );
             s.dispatch(Dispatch::ResetMaster).unwrap();
             assert_eq!(s.master_ratio(0), 7000);
             std::fs::remove_file(path).unwrap();

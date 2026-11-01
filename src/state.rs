@@ -1,6 +1,13 @@
 //! The state shared by every event-loop callback.
 
-use std::{ffi::OsString, sync::Arc, time::Instant};
+use std::{
+    ffi::OsString,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::Instant,
+};
 
 use smithay::{
     desktop::{Space, Window},
@@ -102,6 +109,7 @@ pub struct Villain {
     pub keyboard_shortcuts_inhibit_state: KeyboardShortcutsInhibitState,
     pub virtual_keyboard_manager_state:
         smithay::wayland::virtual_keyboard::VirtualKeyboardManagerState,
+    pub(crate) virtual_keyboard_allowed: Arc<AtomicBool>,
     #[allow(dead_code)]
     pub cursor_shape_state: CursorShapeManagerState,
     #[allow(dead_code)]
@@ -169,11 +177,13 @@ impl Villain {
             Some(&primary_selection_state),
             |_| true,
         );
-        let allow_virtual_keyboard = config.input.allow_virtual_keyboard;
+        let virtual_keyboard_allowed =
+            Arc::new(AtomicBool::new(config.input.allow_virtual_keyboard));
+        let virtual_keyboard_policy = Arc::clone(&virtual_keyboard_allowed);
         let virtual_keyboard_manager_state =
             smithay::wayland::virtual_keyboard::VirtualKeyboardManagerState::new::<Self, _>(
                 &display_handle,
-                move |_| allow_virtual_keyboard,
+                move |_| virtual_keyboard_policy.load(Ordering::Relaxed),
             );
         let mut seat_state = SeatState::new();
         let mut seat = seat_state.new_wl_seat(&display_handle, "villain");
@@ -250,6 +260,7 @@ impl Villain {
                 &display_handle,
             ),
             virtual_keyboard_manager_state,
+            virtual_keyboard_allowed,
             cursor_shape_state: CursorShapeManagerState::new::<Self>(&display_handle),
             output_manager_state: OutputManagerState::new_with_xdg_output::<Self>(&display_handle),
             fractional_scale_manager_state: FractionalScaleManagerState::new::<Self>(
