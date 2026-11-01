@@ -42,7 +42,7 @@ use smithay::{
 use smithay::{
     reexports::{
         wayland_protocols_misc::zwp_virtual_keyboard_v1::server::{
-            zwp_virtual_keyboard_manager_v1::ZwpVirtualKeyboardManagerV1,
+            zwp_virtual_keyboard_manager_v1::{self, ZwpVirtualKeyboardManagerV1},
             zwp_virtual_keyboard_v1::{self, ZwpVirtualKeyboardV1},
         },
         wayland_server::{DataInit, Dispatch, DisplayHandle, backend::ClientId},
@@ -808,11 +808,38 @@ smithay::delegate_seat!(Villain);
 smithay::reexports::wayland_server::delegate_global_dispatch!(Villain: [
     ZwpVirtualKeyboardManagerV1: VirtualKeyboardManagerGlobalData
 ] => VirtualKeyboardManagerState);
-smithay::reexports::wayland_server::delegate_dispatch!(Villain: [
-    ZwpVirtualKeyboardManagerV1: ()
-] => VirtualKeyboardManagerState);
+impl Dispatch<ZwpVirtualKeyboardManagerV1, ()> for Villain {
+    /// Reject manager requests while virtual-keyboard clients are disallowed.
+    fn request(
+        state: &mut Self,
+        client: &Client,
+        resource: &ZwpVirtualKeyboardManagerV1,
+        request: zwp_virtual_keyboard_manager_v1::Request,
+        data: &(),
+        display: &DisplayHandle,
+        data_init: &mut DataInit<'_, Self>,
+    ) {
+        if !state.virtual_keyboard_allowed.load(Ordering::Relaxed) {
+            let id = match request {
+                zwp_virtual_keyboard_manager_v1::Request::CreateVirtualKeyboard { id, .. } => id,
+                _ => return,
+            };
+            data_init.post_error(
+                id,
+                zwp_virtual_keyboard_manager_v1::Error::Unauthorized,
+                "virtual keyboards are disabled by compositor policy",
+            );
+            return;
+        }
+
+        <VirtualKeyboardManagerState as Dispatch<ZwpVirtualKeyboardManagerV1, (), Self>>::request(
+            state, client, resource, request, data, display, data_init,
+        );
+    }
+}
 
 impl Dispatch<ZwpVirtualKeyboardV1, VirtualKeyboardUserData<Villain>> for Villain {
+    /// Ignore input from previously created keyboards while the policy is disabled.
     fn request(
         state: &mut Self,
         client: &Client,
@@ -833,6 +860,7 @@ impl Dispatch<ZwpVirtualKeyboardV1, VirtualKeyboardUserData<Villain>> for Villai
         }
     }
 
+    /// Forward keyboard object cleanup to Smithay.
     fn destroyed(
         state: &mut Self,
         client_id: ClientId,
