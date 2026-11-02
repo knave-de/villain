@@ -143,7 +143,8 @@ layout order. Floating windows participate.
 
 `MOD+SHIFT+H/J/K/L` move the focused window left/down/up/right. Tiled
 windows swap with the nearest tile in that direction; floating windows move
-32 logical pixels per press, constrained to the output.
+32 logical pixels per press, constrained to the output. Restore maximized or
+fullscreen windows before moving them.
 
 ```toml
 [compositor]

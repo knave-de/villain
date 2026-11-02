@@ -166,6 +166,20 @@ pub(crate) fn constrain_geometry(
     rect
 }
 
+fn move_floating_geometry(
+    mut saved: Geometry,
+    output: Size<i32, smithay::utils::Logical>,
+    min: Size<i32, smithay::utils::Logical>,
+    max: Size<i32, smithay::utils::Logical>,
+    delta: (i32, i32),
+) -> Geometry {
+    let mut moved = constrain_geometry(saved, output, min, max);
+    moved.loc.x = moved.loc.x.saturating_add(delta.0);
+    moved.loc.y = moved.loc.y.saturating_add(delta.1);
+    saved.loc = constrain_geometry(moved, output, min, max).loc;
+    saved
+}
+
 fn window_identity(window: &Window) -> Option<(String, String)> {
     if let Some(surface) = window.toplevel() {
         return Some(smithay::wayland::compositor::with_states(
@@ -1670,16 +1684,14 @@ impl Villain {
                 FocusDirection::Down => (0, 32),
             };
             let (min, max) = Self::window_constraints(&current);
-            let mut moved = *rect;
-            moved.loc.x = moved.loc.x.saturating_add(dx);
-            moved.loc.y = moved.loc.y.saturating_add(dy);
-            let moved = constrain_geometry(moved, self.output_size, min, max);
             if let Some(entry) = self.workspaces[index]
                 .windows
                 .iter_mut()
                 .find(|entry| entry.window == current)
+                && let Some(mut saved) = entry.floating
             {
-                entry.floating = Some(moved);
+                saved = move_floating_geometry(saved, self.output_size, min, max, (dx, dy));
+                entry.floating = Some(saved);
                 self.desktop_state_dirty = true;
                 self.relayout_active_workspace();
             }
@@ -1693,7 +1705,7 @@ impl Villain {
         let centers: Vec<_> = candidates.iter().map(|(_, rect)| center_of(rect)).collect();
         if let Some(target) = nearest_center_in_direction(&centers, center_of(rect), direction) {
             self.swap_tiles(&current, &candidates[target].0);
-            self.request_repaint();
+            self.relayout_active_workspace();
         }
     }
 
