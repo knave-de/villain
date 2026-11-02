@@ -1806,6 +1806,16 @@ fn xdg_decoration_negotiation_and_geometry() {
             );
         });
 
+        decoration.destroy();
+        surface.commit();
+        queue.roundtrip(&mut client).unwrap();
+        queue.roundtrip(&mut client).unwrap();
+        inspect(&sender, |state| {
+            let layout = state.workspace_layout(0);
+            let (window, rect, fullscreen, _, _, _) = &layout[0];
+            assert!(crate::workspaces::titlebar_rect(window, *rect, *fullscreen).is_none());
+        });
+
         // Toplevels without the protocol object do not gain a compositor frame.
         let bare_surface = compositor.create_surface(&qh, ());
         let bare_xdg = wm.get_xdg_surface(&bare_surface, &qh, ());
