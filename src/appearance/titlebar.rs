@@ -7,6 +7,9 @@ use smithay::{
     utils::Transform,
 };
 use std::collections::VecDeque;
+use std::time::Instant;
+
+const SLOW_TITLEBAR_RASTER_US: u128 = 1_000;
 
 fn bgra(rgba: [u8; 4]) -> [u8; 4] {
     [rgba[2], rgba[1], rgba[0], rgba[3]]
@@ -163,6 +166,8 @@ impl Titlebars {
             self.entries.push_front(entry);
             return self.entries.front().map(|e| &e.buffer);
         }
+        let profile_raster = tracing::enabled!(target: "villain::perf", tracing::Level::DEBUG);
+        let raster_started = profile_raster.then(Instant::now);
         let mut bg = self.background;
         if !focused {
             for value in &mut bg[..3] {
@@ -350,6 +355,23 @@ impl Titlebars {
         });
         while self.entries.len() > 8 {
             self.entries.pop_back();
+        }
+        if let Some(started) = raster_started {
+            let raster_us = started.elapsed().as_micros();
+            let slow = raster_us >= SLOW_TITLEBAR_RASTER_US;
+            tracing::debug!(
+                target: "villain::perf",
+                event = "titlebar_cache_miss",
+                raster_us,
+                slow,
+                width,
+                title_chars = self.entries.front().map_or(0, |entry| entry.title.chars().count()),
+                focused,
+                hovered = hovered.is_some(),
+                maximized,
+                tiled,
+                "titlebar cache miss rasterized"
+            );
         }
         self.entries.front().map(|entry| &entry.buffer)
     }
