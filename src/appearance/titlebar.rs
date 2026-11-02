@@ -67,7 +67,25 @@ fn stroke_path(
 }
 
 fn control_origin(width: i32, index: i32) -> (f32, f32) {
-    ((width - 24 - index * 24) as f32, 10.4)
+    let slot_left = width - 24 - index * 24;
+    // The paths use a 24-unit viewBox but scale to 13.2px. Center that
+    // smaller glyph inside the 24px hit and hover slot.
+    (slot_left as f32 + (24.0 - 24.0 * 0.55) / 2.0, 10.4)
+}
+
+fn paint_hover(pixels: &mut [u8], width: i32, index: u8) {
+    let right = width - i32::from(index) * 24;
+    let color = if index == 0 {
+        [167, 91, 91, 255]
+    } else {
+        [70, 77, 85, 255]
+    };
+    for y in 5..29 {
+        for x in (right - 23).max(0)..right.min(width) {
+            let i = (y as usize * width as usize + x as usize) * 4;
+            pixels[i..i + 4].copy_from_slice(&bgra(color));
+        }
+    }
 }
 
 struct Entry {
@@ -156,18 +174,7 @@ impl Titlebars {
             px.copy_from_slice(&bgra(bg));
         }
         if let Some(index) = hovered {
-            let right = width - i32::from(index) * 24;
-            let color = if index == 0 {
-                [167, 91, 91, 255]
-            } else {
-                [70, 77, 85, 255]
-            };
-            for y in 5..29 {
-                for x in (right - 23).max(0)..right.min(width) {
-                    let i = (y as usize * width as usize + x as usize) * 4;
-                    pixels[i..i + 4].copy_from_slice(&bgra(color));
-                }
-            }
+            paint_hover(&mut pixels, width, index);
         }
         let mut text = Buffer::new(&mut self.fonts, Metrics::new(13.0, 18.0));
         text.set_size(Some((width - 130).max(1) as f32), Some(20.0));
@@ -351,23 +358,63 @@ impl Titlebars {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn controls_match_actions_and_are_centered_in_hit_slots() {
+    fn rasterized_glyph_is_centered_on_its_hover_background() {
         let width = 800;
+        let index = crate::appearance::TitlebarControl::Minimize.right_slot() as u8;
+        let mut pixels = vec![0; width as usize * 34 * 4];
+        for pixel in pixels.as_chunks_mut::<4>().0 {
+            pixel.copy_from_slice(&super::bgra([24, 28, 32, 255]));
+        }
+        super::paint_hover(&mut pixels, width, index);
+        let hovered_color = super::bgra([70, 77, 85, 255]);
+        let hover_center = ((width - i32::from(index) * 24 - 23) as f32
+            + (width - i32::from(index) * 24 - 1) as f32)
+            / 2.0;
+
+        let (origin, _) = super::control_origin(width, i32::from(index));
+        super::stroke_path(
+            &mut pixels,
+            width,
+            [240, 240, 240, 255],
+            (origin, 10.4),
+            &[(5.0, 12.0), (19.0, 12.0)],
+        );
+
+        let mut weighted_x = 0.0;
+        let mut weight = 0.0;
+        let hover_left = (width - i32::from(index) * 24 - 23).max(0) as usize;
+        let hover_right = (width - i32::from(index) * 24).min(width) as usize;
+        for y in 5..29 {
+            for x in hover_left..hover_right {
+                let pixel = &pixels[(y * width as usize + x) * 4..][..4];
+                if pixel == hovered_color {
+                    continue;
+                }
+                // Glyph pixels differ from the exact hover fill; measure their
+                // raster coverage rather than inferring location from origin.
+                let coverage = u32::from(pixel[0].abs_diff(hovered_color[0]))
+                    + u32::from(pixel[1].abs_diff(hovered_color[1]))
+                    + u32::from(pixel[2].abs_diff(hovered_color[2]));
+                if coverage > 0 {
+                    weighted_x += (x as f32 + 0.5) * coverage as f32;
+                    weight += coverage as f32;
+                }
+            }
+        }
+        assert!(
+            weight > 0.0,
+            "minimize glyph must rasterize over hover fill"
+        );
+        assert!((weighted_x / weight - hover_center).abs() <= 0.5);
+
         use crate::appearance::TitlebarControl as Control;
-        let controls = [
+        for (control, distance) in [
             (Control::Close, 12.0),
             (Control::Maximize, 36.0),
             (Control::Float, 60.0),
             (Control::Minimize, 84.0),
-        ];
-        for (control, distance) in controls {
+        ] {
             assert_eq!(Control::from_right_distance(distance), Some(control));
-            let (origin, _) = super::control_origin(width, control.right_slot());
-            let glyph_center = origin + 12.0;
-            let slot = control.right_slot();
-            let hit_left = (width - (slot + 1) * 24) as f32;
-            let hit_right = (width - slot * 24) as f32;
-            assert_eq!(glyph_center, (hit_left + hit_right) / 2.0);
         }
         assert_eq!(Control::from_right_distance(24.0), Some(Control::Close));
         assert_eq!(Control::from_right_distance(48.0), Some(Control::Maximize));
