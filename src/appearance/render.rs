@@ -264,7 +264,7 @@ impl EffectsRenderer {
                 Kind::Unspecified,
             )
             .map_err(EffectError::Renderer)?;
-            elements.push(EffectElement::Memory(element));
+            elements.insert(0, EffectElement::Memory(element));
         }
         if workspace == state.active_workspace
             && layers == SceneLayers::All

@@ -32,6 +32,7 @@ struct Client {
     configure_counts: HashMap<usize, usize>,
     decoration_configure_counts: HashMap<usize, usize>,
     pointer_buttons: usize,
+    pointer_button_serials: Vec<u32>,
     swipes: Vec<String>,
     pinches: Vec<String>,
     holds: Vec<String>,
@@ -127,8 +128,9 @@ impl Dispatch<wl_pointer::WlPointer, ()> for Client {
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {
-        if matches!(event, wl_pointer::Event::Button { .. }) {
+        if let wl_pointer::Event::Button { serial, .. } = event {
             state.pointer_buttons += 1;
+            state.pointer_button_serials.push(serial);
         }
     }
 }
@@ -308,6 +310,11 @@ fn find(state: &Villain, app: &str) -> WindowInfo {
         .find(|window| window.app_id == app)
         .unwrap()
 }
+fn find_id(sender: &mpsc::Sender<Inspect>, app: &'static str) -> WindowId {
+    let (done, receive) = mpsc::channel();
+    inspect(sender, move |state| done.send(find(state, app).id).unwrap());
+    receive.recv_timeout(Duration::from_secs(5)).unwrap()
+}
 fn mapped(state: &Villain, app: &str) -> bool {
     let info = find(state, app);
     state
@@ -440,6 +447,79 @@ fn wayland_floating_and_fullscreen_requests() {
         settle(&mut queue, &mut client);
         inspect(&sender, |state| finish_opening_frames(state));
         settle(&mut queue, &mut client);
+
+        let primary_id = find_id(&sender, "primary");
+        inspect(&sender, move |state| {
+            use smithay::backend::input::{ButtonState, KeyState};
+            state.host_focused = true;
+            state.pointer_location = (100.0, 100.0).into();
+            crate::keybinds::handle_keyboard_key(
+                state,
+                smithay::input::keyboard::Keycode::new(133),
+                KeyState::Pressed,
+                10,
+            );
+            assert!(state.handle_compositor_button(0x111, ButtonState::Pressed, 11));
+            let menu = state.window_menu.as_ref().unwrap();
+            assert_eq!(menu.window_id, primary_id);
+            let menu_rect = menu.rect;
+            state.handle_compositor_button(0x111, ButtonState::Released, 12);
+
+            // Focus changes after opening cannot redirect the menu action.
+            state.focus_window(find(state, "other").id);
+            state.pointer_location = (
+                f64::from(menu_rect.loc.x + 50),
+                f64::from(menu_rect.loc.y + 105),
+            )
+                .into();
+            assert!(state.handle_compositor_button(0x110, ButtonState::Pressed, 13));
+            assert!(state.handle_compositor_button(0x110, ButtonState::Released, 14));
+            crate::keybinds::handle_keyboard_key(
+                state,
+                smithay::input::keyboard::Keycode::new(133),
+                KeyState::Released,
+                15,
+            );
+            assert!(state.window_menu.is_none());
+            assert!(state.suppressed_keys.is_empty());
+            assert!(!state.keyboard.modifier_state().logo);
+        });
+        settle(&mut queue, &mut client);
+        assert_eq!(client.closes, 1, "the captured primary window closes");
+
+        // XDG show_window_menu accepts only a live pointer serial focused on
+        // the requesting toplevel; an invalid serial leaves the menu closed.
+        inspect(&sender, |state| {
+            state.pointer_location = (500.0, 100.0).into();
+            state.refresh_pointer_surface(20);
+            let serial = SERIAL_COUNTER.next_serial();
+            state.pointer.clone().button(
+                state,
+                &smithay::input::pointer::ButtonEvent {
+                    serial,
+                    time: 20,
+                    button: 0x110,
+                    state: smithay::backend::input::ButtonState::Pressed,
+                },
+            );
+        });
+        settle(&mut queue, &mut client);
+        let serial = *client.pointer_button_serials.last().unwrap();
+        bt.show_window_menu(&seat, serial.wrapping_add(1), 120, 80);
+        settle(&mut queue, &mut client);
+        inspect(&sender, |state| assert!(state.window_menu.is_none()));
+        at.show_window_menu(&seat, serial, 120, 80);
+        settle(&mut queue, &mut client);
+        inspect(&sender, |state| assert!(state.window_menu.is_none()));
+        bt.show_window_menu(&seat, serial, 120, 80);
+        settle(&mut queue, &mut client);
+        let other_id = find_id(&sender, "other");
+        inspect(&sender, move |state| {
+            assert_eq!(state.window_menu.as_ref().unwrap().window_id, other_id);
+            state.window_menu = None;
+            state.release_pointer_buttons();
+        });
+
         std::thread::sleep(Duration::from_secs(1));
         inspect(&sender, |s| {
             s.pointer_location = (100.0, 100.0).into();
