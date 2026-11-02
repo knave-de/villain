@@ -493,6 +493,7 @@ fn wayland_floating_and_fullscreen_requests() {
             state.pointer_location = (500.0, 100.0).into();
             state.refresh_pointer_surface(20);
             let serial = SERIAL_COUNTER.next_serial();
+            state.pressed_buttons.insert(0x110);
             state.pointer.clone().button(
                 state,
                 &smithay::input::pointer::ButtonEvent {
@@ -519,6 +520,9 @@ fn wayland_floating_and_fullscreen_requests() {
             state.window_menu = None;
             state.release_pointer_buttons();
         });
+        settle(&mut queue, &mut client);
+        client.pointer_buttons = 0;
+        client.pointer_button_serials.clear();
 
         std::thread::sleep(Duration::from_secs(1));
         inspect(&sender, |s| {

@@ -237,10 +237,10 @@ impl Villain {
                     .contains(self.pointer_location)
                     .then_some((window, bar, maximized, tiled))
             });
-        let Some((window, bar, maximized, tiled)) = hit else {
+        let Some((window, _bar, maximized, tiled)) = hit else {
             return false;
         };
-        self.open_window_menu(window, self.pointer_location, maximized, tiled, bar);
+        self.open_window_menu(window, self.pointer_location, maximized, tiled);
         true
     }
 
@@ -262,7 +262,7 @@ impl Villain {
         {
             return false;
         }
-        let Some((_, rect, fullscreen, maximized, tiled, visible)) = self
+        let Some((_, _, fullscreen, maximized, tiled, visible)) = self
             .workspace_layout(self.active_workspace)
             .into_iter()
             .find(|entry| entry.0 == window)
@@ -272,7 +272,7 @@ impl Villain {
         if !visible || fullscreen {
             return false;
         }
-        self.open_window_menu(window, self.pointer_location, maximized, tiled, rect);
+        self.open_window_menu(window, self.pointer_location, maximized, tiled);
         true
     }
 
@@ -282,7 +282,6 @@ impl Villain {
         anchor: smithay::utils::Point<f64, smithay::utils::Logical>,
         maximized: bool,
         tiled: bool,
-        _bounds: smithay::utils::Rectangle<i32, smithay::utils::Logical>,
     ) {
         let Some(window_id) = self.window_id(&window) else {
             return;
@@ -325,6 +324,9 @@ impl Villain {
         match row {
             0 => self.apply_window_action(&window, crate::workspaces::WindowAction::Minimize),
             1 => {
+                if menu.maximized {
+                    self.set_window_maximized(&window, false);
+                }
                 if self.focus_managed_window(&window) {
                     let _ = self.toggle_floating_focused();
                 }

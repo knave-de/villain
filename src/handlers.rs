@@ -747,7 +747,7 @@ impl XdgShellHandler for Villain {
         if root != window.wl_surface().map(|surface| surface.into_owned()) {
             return;
         }
-        let Some((_, rect, fullscreen, maximized, tiled, visible)) = self
+        let Some((_, _, fullscreen, maximized, tiled, visible)) = self
             .workspace_layout(self.active_workspace)
             .into_iter()
             .find(|entry| entry.0 == window)
@@ -757,10 +757,10 @@ impl XdgShellHandler for Villain {
         if !visible || fullscreen || self.layer_under_pointer(true).is_some() {
             return;
         }
-        let origin = self.space.element_location(&window).unwrap_or(rect.loc);
+        let origin = self.space.element_location(&window).unwrap_or_default();
         let anchor =
             smithay::utils::Point::from((origin.x + location.x, origin.y + location.y)).to_f64();
-        self.open_window_menu(window, anchor, maximized, tiled, rect);
+        self.open_window_menu(window, anchor, maximized, tiled);
     }
 
     fn new_popup(&mut self, surface: PopupSurface, positioner: PositionerState) {
