@@ -29,6 +29,7 @@ struct Configure {
 #[derive(Default)]
 struct Client {
     configures: HashMap<usize, Configure>,
+    decoration_configure_counts: HashMap<usize, usize>,
     pointer_buttons: usize,
     swipes: Vec<String>,
     pinches: Vec<String>,
@@ -1687,6 +1688,7 @@ impl Dispatch<zxdg_toplevel_decoration_v1::ZxdgToplevelDecorationV1, usize> for 
         } = event
         {
             state.decoration_modes.insert(*id, mode as u32);
+            *state.decoration_configure_counts.entry(*id).or_default() += 1;
         }
     }
 }
@@ -1735,6 +1737,15 @@ fn xdg_decoration_negotiation_and_geometry() {
         assert_eq!(
             client.decoration_modes[&1],
             zxdg_toplevel_decoration_v1::Mode::ClientSide as u32
+        );
+        let client_side_configures = client.decoration_configure_counts[&1];
+        decoration.set_mode(zxdg_toplevel_decoration_v1::Mode::ClientSide);
+        surface.commit();
+        queue.roundtrip(&mut client).unwrap();
+        queue.roundtrip(&mut client).unwrap();
+        assert_eq!(
+            client.decoration_configure_counts[&1], client_side_configures,
+            "repeating the negotiated mode must not configure again"
         );
         inspect(&sender, |state| {
             let (window, rect, fullscreen, _, _, _) = &state.workspace_layout(0)[0];

@@ -980,7 +980,11 @@ type DecorationMode = smithay::reexports::wayland_protocols::xdg::decoration::zv
 
 impl Villain {
     fn set_decoration_mode(&mut self, toplevel: ToplevelSurface, mode: DecorationMode) {
-        smithay::wayland::compositor::with_states(toplevel.wl_surface(), |states| {
+        let changed = smithay::wayland::compositor::with_states(toplevel.wl_surface(), |states| {
+            let had_mode = states
+                .data_map
+                .get::<crate::workspaces::XdgDecorationModeState>()
+                .is_some();
             states.data_map.insert_if_missing_threadsafe(|| {
                 crate::workspaces::XdgDecorationModeState(std::sync::Mutex::new(mode))
             });
@@ -989,9 +993,15 @@ impl Villain {
                 .get::<crate::workspaces::XdgDecorationModeState>()
                 && let Ok(mut effective_mode) = decoration.0.lock()
             {
+                let changed = !had_mode || *effective_mode != mode;
                 *effective_mode = mode;
+                return changed;
             }
+            true
         });
+        if !changed {
+            return;
+        }
         toplevel.with_pending_state(|state| state.decoration_mode = Some(mode));
         if toplevel.is_initial_configure_sent() {
             toplevel.send_pending_configure();
