@@ -18,6 +18,7 @@ use smithay::{
 use std::{
     collections::BTreeMap,
     process::Command,
+    sync::Mutex,
     time::{Duration, Instant},
 };
 
@@ -167,16 +168,17 @@ pub(crate) fn constrain_geometry(
 }
 
 pub(crate) const TITLEBAR_HEIGHT: i32 = 34;
-pub(crate) const GALLERY_APP_ID: &str = "org.knave.WidgetGallery";
 
-pub(crate) fn gallery_toplevel(surface: &ToplevelSurface) -> bool {
+pub(crate) struct XdgDecorationModeState(pub Mutex<smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode>);
+
+pub(crate) fn has_server_side_decoration(surface: &ToplevelSurface) -> bool {
+    use smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode;
     smithay::wayland::compositor::with_states(surface.wl_surface(), |states| {
         states
             .data_map
-            .get::<smithay::wayland::shell::xdg::XdgToplevelSurfaceData>()
-            .and_then(|data| data.lock().ok().and_then(|attrs| attrs.app_id.clone()))
-            .as_deref()
-            == Some(GALLERY_APP_ID)
+            .get::<XdgDecorationModeState>()
+            .and_then(|state| state.0.lock().ok().map(|mode| *mode))
+            == Some(Mode::ServerSide)
     })
 }
 
@@ -185,7 +187,7 @@ pub(crate) fn titlebar_rect(
     client: Geometry,
     fullscreen: bool,
 ) -> Option<Geometry> {
-    if fullscreen || !window.toplevel().is_some_and(gallery_toplevel) {
+    if fullscreen || !window.toplevel().is_some_and(has_server_side_decoration) {
         return None;
     }
     Some(Rectangle::new(
@@ -265,15 +267,14 @@ impl Workspace {
 }
 
 impl Villain {
-    /// The gallery's server titlebar is compositor-owned, while the mapped
-    /// element location already marks the client surface origin. Other
-    /// windows may have geometry extents that must be removed from the element
-    /// location to find that origin.
+    /// A server titlebar is compositor-owned, while the mapped element
+    /// location already marks the client surface origin. Other windows may
+    /// have geometry extents that must be removed to find that origin.
     fn pointer_origin(
         window: &Window,
         location: Point<i32, smithay::utils::Logical>,
     ) -> Point<i32, smithay::utils::Logical> {
-        if window.toplevel().is_some_and(gallery_toplevel) {
+        if window.toplevel().is_some_and(has_server_side_decoration) {
             location
         } else {
             location - window.geometry().loc
@@ -647,7 +648,12 @@ impl Villain {
                 }
             };
             let mut rect = rect;
-            if !is_fullscreen && entry.window.toplevel().is_some_and(gallery_toplevel) {
+            if !is_fullscreen
+                && entry
+                    .window
+                    .toplevel()
+                    .is_some_and(has_server_side_decoration)
+            {
                 let height = TITLEBAR_HEIGHT.min(rect.size.h.saturating_sub(1).max(0));
                 rect.loc.y += height;
                 rect.size.h -= height;

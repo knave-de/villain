@@ -1693,7 +1693,7 @@ impl Dispatch<zxdg_toplevel_decoration_v1::ZxdgToplevelDecorationV1, usize> for 
 
 #[test]
 #[ignore = "requires private Unix sockets and an isolated XDG_RUNTIME_DIR"]
-fn gallery_decoration_negotiation_and_geometry() {
+fn xdg_decoration_negotiation_and_geometry() {
     let mut event_loop = EventLoop::try_new().unwrap();
     let mut state = Villain::new(
         &mut event_loop,
@@ -1718,9 +1718,37 @@ fn gallery_decoration_negotiation_and_geometry() {
         let surface = compositor.create_surface(&qh, ());
         let xdg = wm.get_xdg_surface(&surface, &qh, ());
         let top = xdg.get_toplevel(&qh, 1);
-        // Request decoration before setting the ID, as clients may do either first.
-        let _decoration = manager.get_toplevel_decoration(&top, &qh, 1);
-        top.set_app_id(crate::workspaces::GALLERY_APP_ID.into());
+        // A decoration object with no requested mode defaults to server-side.
+        let decoration = manager.get_toplevel_decoration(&top, &qh, 1);
+        top.set_app_id("arbitrary.application".into());
+        surface.commit();
+        queue.roundtrip(&mut client).unwrap();
+        queue.roundtrip(&mut client).unwrap();
+        assert_eq!(
+            client.decoration_modes[&1],
+            zxdg_toplevel_decoration_v1::Mode::ServerSide as u32
+        );
+        decoration.set_mode(zxdg_toplevel_decoration_v1::Mode::ClientSide);
+        surface.commit();
+        queue.roundtrip(&mut client).unwrap();
+        queue.roundtrip(&mut client).unwrap();
+        assert_eq!(
+            client.decoration_modes[&1],
+            zxdg_toplevel_decoration_v1::Mode::ClientSide as u32
+        );
+        inspect(&sender, |state| {
+            let (window, rect, fullscreen, _, _, _) = &state.workspace_layout(0)[0];
+            assert!(crate::workspaces::titlebar_rect(window, *rect, *fullscreen).is_none());
+        });
+        decoration.set_mode(zxdg_toplevel_decoration_v1::Mode::ServerSide);
+        surface.commit();
+        queue.roundtrip(&mut client).unwrap();
+        queue.roundtrip(&mut client).unwrap();
+        assert_eq!(
+            client.decoration_modes[&1],
+            zxdg_toplevel_decoration_v1::Mode::ServerSide as u32
+        );
+        decoration.unset_mode();
         surface.commit();
         queue.roundtrip(&mut client).unwrap();
         queue.roundtrip(&mut client).unwrap();
@@ -1752,13 +1780,35 @@ fn gallery_decoration_negotiation_and_geometry() {
                 2,
             );
         });
-        top.set_app_id("other.application".into());
+
+        // Toplevels without the protocol object do not gain a compositor frame.
+        let bare_surface = compositor.create_surface(&qh, ());
+        let bare_xdg = wm.get_xdg_surface(&bare_surface, &qh, ());
+        let bare_top = bare_xdg.get_toplevel(&qh, 2);
+        bare_top.set_app_id("undecorated.application".into());
+        bare_surface.commit();
         queue.roundtrip(&mut client).unwrap();
         queue.roundtrip(&mut client).unwrap();
-        assert_eq!(
-            client.decoration_modes[&1],
-            zxdg_toplevel_decoration_v1::Mode::ClientSide as u32
-        );
+        inspect(&sender, |state| {
+            let bare = state.workspace_layout(0).into_iter().find(|(window, ..)| {
+                window.toplevel().is_some_and(|top| {
+                    smithay::wayland::compositor::with_states(top.wl_surface(), |states| {
+                        states
+                            .data_map
+                            .get::<smithay::wayland::shell::xdg::XdgToplevelSurfaceData>()
+                            .and_then(|data| {
+                                data.lock()
+                                    .ok()
+                                    .and_then(|attributes| attributes.app_id.clone())
+                            })
+                            .as_deref()
+                            == Some("undecorated.application")
+                    })
+                })
+            });
+            let (window, rect, fullscreen, _, _, _) = bare.expect("bare toplevel mapped");
+            assert!(crate::workspaces::titlebar_rect(&window, rect, fullscreen).is_none());
+        });
     });
     let deadline = Instant::now() + Duration::from_secs(20);
     while !thread.is_finished() {

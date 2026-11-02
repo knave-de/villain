@@ -639,7 +639,6 @@ impl XdgShellHandler for Villain {
     fn app_id_changed(&mut self, surface: ToplevelSurface) {
         self.desktop_state_dirty = true;
         let configured = surface.is_initial_configure_sent();
-        client_decoration(surface);
         if configured {
             self.relayout_active_workspace();
         }
@@ -965,32 +964,39 @@ mod popup_geometry_tests {
 
 impl smithay::wayland::shell::xdg::decoration::XdgDecorationHandler for Villain {
     fn new_decoration(&mut self, toplevel: ToplevelSurface) {
-        client_decoration(toplevel);
+        self.set_decoration_mode(toplevel, DecorationMode::ServerSide);
     }
 
-    fn request_mode(
-        &mut self,
-        toplevel: ToplevelSurface,
-        _mode: smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode,
-    ) {
-        client_decoration(toplevel);
+    fn request_mode(&mut self, toplevel: ToplevelSurface, mode: DecorationMode) {
+        self.set_decoration_mode(toplevel, mode);
     }
 
     fn unset_mode(&mut self, toplevel: ToplevelSurface) {
-        client_decoration(toplevel);
+        self.set_decoration_mode(toplevel, DecorationMode::ServerSide);
     }
 }
 
-fn client_decoration(toplevel: ToplevelSurface) {
-    use smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode;
-    let mode = if crate::workspaces::gallery_toplevel(&toplevel) {
-        Mode::ServerSide
-    } else {
-        Mode::ClientSide
-    };
-    toplevel.with_pending_state(|state| state.decoration_mode = Some(mode));
-    if toplevel.is_initial_configure_sent() {
-        toplevel.send_pending_configure();
+type DecorationMode = smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode;
+
+impl Villain {
+    fn set_decoration_mode(&mut self, toplevel: ToplevelSurface, mode: DecorationMode) {
+        smithay::wayland::compositor::with_states(toplevel.wl_surface(), |states| {
+            states.data_map.insert_if_missing_threadsafe(|| {
+                crate::workspaces::XdgDecorationModeState(std::sync::Mutex::new(mode))
+            });
+            if let Some(decoration) = states
+                .data_map
+                .get::<crate::workspaces::XdgDecorationModeState>()
+                && let Ok(mut effective_mode) = decoration.0.lock()
+            {
+                *effective_mode = mode;
+            }
+        });
+        toplevel.with_pending_state(|state| state.decoration_mode = Some(mode));
+        if toplevel.is_initial_configure_sent() {
+            toplevel.send_pending_configure();
+        }
+        self.relayout_active_workspace();
     }
 }
 
