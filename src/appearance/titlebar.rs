@@ -12,6 +12,60 @@ fn bgra(rgba: [u8; 4]) -> [u8; 4] {
     [rgba[2], rgba[1], rgba[0], rgba[3]]
 }
 
+fn stroke_segment(pixels: &mut [u8], width: i32, color: [u8; 4], a: (f32, f32), b: (f32, f32)) {
+    // Four subpixel samples keep the small titlebar glyphs crisp without a
+    // texture dependency or changing the titlebar's memory-buffer format.
+    const SAMPLES: [(f32, f32); 4] = [(0.25, 0.25), (0.75, 0.25), (0.25, 0.75), (0.75, 0.75)];
+    let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+    let len2 = dx * dx + dy * dy;
+    let radius = 0.8f32;
+    let min_x = (a.0.min(b.0) - radius - 1.0).floor().max(0.0) as i32;
+    let max_x = (a.0.max(b.0) + radius + 1.0).ceil().min(width as f32) as i32;
+    let min_y = (a.1.min(b.1) - radius - 1.0).floor().max(0.0) as i32;
+    let max_y = (a.1.max(b.1) + radius + 1.0).ceil().min(34.0) as i32;
+    for y in min_y..max_y {
+        for x in min_x..max_x {
+            let covered = SAMPLES
+                .iter()
+                .filter(|&&(sx, sy)| {
+                    let px = x as f32 + sx;
+                    let py = y as f32 + sy;
+                    let t = if len2 == 0.0 {
+                        0.0
+                    } else {
+                        (((px - a.0) * dx + (py - a.1) * dy) / len2).clamp(0.0, 1.0)
+                    };
+                    let (qx, qy) = (a.0 + t * dx, a.1 + t * dy);
+                    (px - qx).powi(2) + (py - qy).powi(2) <= radius * radius
+                })
+                .count() as u32;
+            if covered == 0 {
+                continue;
+            }
+            let i = (y as usize * width as usize + x as usize) * 4;
+            let alpha = covered * u32::from(color[3]) / 4;
+            for (channel, value) in [(2, color[0]), (1, color[1]), (0, color[2])] {
+                pixels[i + channel] = ((u32::from(value) * alpha
+                    + u32::from(pixels[i + channel]) * (255 - alpha))
+                    / 255) as u8;
+            }
+        }
+    }
+}
+
+fn stroke_path(
+    pixels: &mut [u8],
+    width: i32,
+    color: [u8; 4],
+    origin: (f32, f32),
+    points: &[(f32, f32)],
+) {
+    for pair in points.windows(2) {
+        let map = |(x, y): (f32, f32)| (origin.0 + x * 0.55, origin.1 + y * 0.55);
+        stroke_segment(pixels, width, color, map(pair[0]), map(pair[1]));
+    }
+}
+
 struct Entry {
     title: String,
     width: i32,
@@ -138,44 +192,133 @@ impl Titlebars {
                 }
             }
         });
-        // Four standard window-control glyphs, drawn into the same bounded buffer.
-        let mut point = |x: i32, y: i32| {
-            if x >= 0 && x < width && (0..34).contains(&y) {
-                let i = (y as usize * width as usize + x as usize) * 4;
-                pixels[i..i + 4].copy_from_slice(&bgra(self.foreground));
-            }
-        };
-        for x in 0..10 {
-            point(width - 89 + x, 19);
-            point(width - 65 + x, 12);
-            point(width - 65 + x, 21);
-            point(width - 41 + x, 12);
-            point(width - 41 + x, 21);
-            point(width - 17 + x, 12 + x);
-            point(width - 17 + x, 21 - x);
-        }
-        for y in 12..22 {
-            point(width - 65, y);
-            point(width - 56, y);
-            point(width - 41, y);
-            point(width - 32, y);
+        // Match the titlebar glyph geometry from knave-mockup's 24px SVGs.
+        // The control actions stay in their existing slots and retain their
+        // existing hit regions; only the cached buffer artwork changes.
+        let glyph = self.foreground;
+        let center = |slot: i32| (width as f32 - 84.0 + slot as f32 * 24.0, 10.4);
+        stroke_path(
+            &mut pixels,
+            width,
+            glyph,
+            center(0),
+            &[(5.0, 12.0), (19.0, 12.0)],
+        );
+        if tiled {
+            stroke_path(
+                &mut pixels,
+                width,
+                glyph,
+                center(1),
+                &[
+                    (3.0, 3.0),
+                    (15.0, 3.0),
+                    (15.0, 15.0),
+                    (3.0, 15.0),
+                    (3.0, 3.0),
+                ],
+            );
+            stroke_path(
+                &mut pixels,
+                width,
+                glyph,
+                center(1),
+                &[
+                    (9.0, 9.0),
+                    (21.0, 9.0),
+                    (21.0, 21.0),
+                    (9.0, 21.0),
+                    (9.0, 9.0),
+                ],
+            );
+        } else {
+            // A four-pane outline reads as the action to tile this floating window.
+            stroke_path(
+                &mut pixels,
+                width,
+                glyph,
+                center(1),
+                &[
+                    (4.0, 4.0),
+                    (20.0, 4.0),
+                    (20.0, 20.0),
+                    (4.0, 20.0),
+                    (4.0, 4.0),
+                ],
+            );
+            stroke_path(
+                &mut pixels,
+                width,
+                glyph,
+                center(1),
+                &[(12.0, 4.0), (12.0, 20.0)],
+            );
+            stroke_path(
+                &mut pixels,
+                width,
+                glyph,
+                center(1),
+                &[(4.0, 12.0), (20.0, 12.0)],
+            );
         }
         if maximized {
-            for x in 0..7 {
-                point(width - 39 + x, 10);
-            }
-            for y in 10..17 {
-                point(width - 33, y);
-            }
+            // Restore: two offset windows, with the rear window's top edge visible.
+            stroke_path(
+                &mut pixels,
+                width,
+                glyph,
+                center(2),
+                &[
+                    (8.0, 4.0),
+                    (20.0, 4.0),
+                    (20.0, 16.0),
+                    (8.0, 16.0),
+                    (8.0, 4.0),
+                ],
+            );
+            stroke_path(
+                &mut pixels,
+                width,
+                glyph,
+                center(2),
+                &[(4.0, 8.0), (4.0, 20.0), (16.0, 20.0), (16.0, 16.0)],
+            );
+            stroke_path(
+                &mut pixels,
+                width,
+                glyph,
+                center(2),
+                &[(4.0, 8.0), (8.0, 8.0)],
+            );
+        } else {
+            stroke_path(
+                &mut pixels,
+                width,
+                glyph,
+                center(2),
+                &[
+                    (5.0, 5.0),
+                    (19.0, 5.0),
+                    (19.0, 19.0),
+                    (5.0, 19.0),
+                    (5.0, 5.0),
+                ],
+            );
         }
-        if !tiled {
-            for x in 0..7 {
-                point(width - 63 + x, 10);
-            }
-            for y in 10..17 {
-                point(width - 57, y);
-            }
-        }
+        stroke_path(
+            &mut pixels,
+            width,
+            glyph,
+            center(3),
+            &[(6.0, 6.0), (18.0, 18.0)],
+        );
+        stroke_path(
+            &mut pixels,
+            width,
+            glyph,
+            center(3),
+            &[(6.0, 18.0), (18.0, 6.0)],
+        );
         let buffer = MemoryRenderBuffer::from_slice(
             &pixels,
             Fourcc::Argb8888,
