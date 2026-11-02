@@ -166,6 +166,34 @@ pub(crate) fn constrain_geometry(
     rect
 }
 
+pub(crate) const TITLEBAR_HEIGHT: i32 = 34;
+pub(crate) const GALLERY_APP_ID: &str = "org.knave.WidgetGallery";
+
+pub(crate) fn gallery_toplevel(surface: &ToplevelSurface) -> bool {
+    smithay::wayland::compositor::with_states(surface.wl_surface(), |states| {
+        states
+            .data_map
+            .get::<smithay::wayland::shell::xdg::XdgToplevelSurfaceData>()
+            .and_then(|data| data.lock().ok().and_then(|attrs| attrs.app_id.clone()))
+            .as_deref()
+            == Some(GALLERY_APP_ID)
+    })
+}
+
+pub(crate) fn titlebar_rect(
+    window: &Window,
+    client: Geometry,
+    fullscreen: bool,
+) -> Option<Geometry> {
+    if fullscreen || !window.toplevel().is_some_and(gallery_toplevel) {
+        return None;
+    }
+    Some(Rectangle::new(
+        (client.loc.x, client.loc.y - TITLEBAR_HEIGHT).into(),
+        (client.size.w, TITLEBAR_HEIGHT).into(),
+    ))
+}
+
 fn window_identity(window: &Window) -> Option<(String, String)> {
     if let Some(surface) = window.toplevel() {
         return Some(smithay::wayland::compositor::with_states(
@@ -603,6 +631,12 @@ impl Villain {
                     crate::appearance::client_rect(base, &self.config.appearance, view, true)
                 }
             };
+            let mut rect = rect;
+            if !is_fullscreen && entry.window.toplevel().is_some_and(gallery_toplevel) {
+                let height = TITLEBAR_HEIGHT.min(rect.size.h.saturating_sub(1).max(0));
+                rect.loc.y += height;
+                rect.size.h -= height;
+            }
             let visible = !entry.minimized
                 && !workspace.hidden_by_parent(entry)
                 && exclusive.is_none_or(|owner| {

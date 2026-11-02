@@ -636,8 +636,13 @@ impl XdgShellHandler for Villain {
         self.desktop_state_dirty = true;
     }
 
-    fn app_id_changed(&mut self, _surface: ToplevelSurface) {
+    fn app_id_changed(&mut self, surface: ToplevelSurface) {
         self.desktop_state_dirty = true;
+        let configured = surface.is_initial_configure_sent();
+        client_decoration(surface);
+        if configured {
+            self.relayout_active_workspace();
+        }
     }
 
     fn new_toplevel(&mut self, surface: ToplevelSurface) {
@@ -957,3 +962,36 @@ mod popup_geometry_tests {
         assert!(safe_popup_geometry_unconstrained(positioner).is_none());
     }
 }
+
+impl smithay::wayland::shell::xdg::decoration::XdgDecorationHandler for Villain {
+    fn new_decoration(&mut self, toplevel: ToplevelSurface) {
+        client_decoration(toplevel);
+    }
+
+    fn request_mode(
+        &mut self,
+        toplevel: ToplevelSurface,
+        _mode: smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode,
+    ) {
+        client_decoration(toplevel);
+    }
+
+    fn unset_mode(&mut self, toplevel: ToplevelSurface) {
+        client_decoration(toplevel);
+    }
+}
+
+fn client_decoration(toplevel: ToplevelSurface) {
+    use smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode;
+    let mode = if crate::workspaces::gallery_toplevel(&toplevel) {
+        Mode::ServerSide
+    } else {
+        Mode::ClientSide
+    };
+    toplevel.with_pending_state(|state| state.decoration_mode = Some(mode));
+    if toplevel.is_initial_configure_sent() {
+        toplevel.send_pending_configure();
+    }
+}
+
+smithay::delegate_xdg_decoration!(Villain);

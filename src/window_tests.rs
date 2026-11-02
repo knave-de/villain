@@ -38,6 +38,7 @@ struct Client {
     keyboard_enters: Vec<(wl_surface::WlSurface, Vec<u8>)>,
     inhibitor_states: Vec<bool>,
     closes: usize,
+    decoration_modes: HashMap<usize, u32>,
 }
 impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for Client {
     fn event(
@@ -1667,3 +1668,112 @@ mod drag_tests;
 
 #[path = "stacking_tests.rs"]
 mod stacking_tests;
+
+use wayland_protocols::xdg::decoration::zv1::client::{
+    zxdg_decoration_manager_v1, zxdg_toplevel_decoration_v1,
+};
+delegate_noop!(Client: ignore zxdg_decoration_manager_v1::ZxdgDecorationManagerV1);
+impl Dispatch<zxdg_toplevel_decoration_v1::ZxdgToplevelDecorationV1, usize> for Client {
+    fn event(
+        state: &mut Self,
+        _: &zxdg_toplevel_decoration_v1::ZxdgToplevelDecorationV1,
+        event: zxdg_toplevel_decoration_v1::Event,
+        id: &usize,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let zxdg_toplevel_decoration_v1::Event::Configure {
+            mode: wayland_client::WEnum::Value(mode),
+        } = event
+        {
+            state.decoration_modes.insert(*id, mode as u32);
+        }
+    }
+}
+
+#[test]
+#[ignore = "requires private Unix sockets and an isolated XDG_RUNTIME_DIR"]
+fn gallery_decoration_negotiation_and_geometry() {
+    let mut event_loop = EventLoop::try_new().unwrap();
+    let mut state = Villain::new(
+        &mut event_loop,
+        Display::new().unwrap(),
+        crate::config::RuntimeConfig::load().unwrap(),
+    );
+    let (server, client) = UnixStream::pair().unwrap();
+    state
+        .display_handle
+        .insert_client(server, Arc::new(crate::state::ClientState::default()))
+        .unwrap();
+    let (sender, requests) = mpsc::channel::<Inspect>();
+    let thread = std::thread::spawn(move || {
+        let conn = Connection::from_socket(client).unwrap();
+        let (globals, mut queue) = registry_queue_init::<Client>(&conn).unwrap();
+        let qh = queue.handle();
+        let compositor: wl_compositor::WlCompositor = globals.bind(&qh, 1..=4, ()).unwrap();
+        let wm: xdg_wm_base::XdgWmBase = globals.bind(&qh, 1..=6, ()).unwrap();
+        let manager: zxdg_decoration_manager_v1::ZxdgDecorationManagerV1 =
+            globals.bind(&qh, 1..=1, ()).unwrap();
+        let mut client = Client::default();
+        let surface = compositor.create_surface(&qh, ());
+        let xdg = wm.get_xdg_surface(&surface, &qh, ());
+        let top = xdg.get_toplevel(&qh, 1);
+        // Request decoration before setting the ID, as clients may do either first.
+        let _decoration = manager.get_toplevel_decoration(&top, &qh, 1);
+        top.set_app_id(crate::workspaces::GALLERY_APP_ID.into());
+        surface.commit();
+        queue.roundtrip(&mut client).unwrap();
+        queue.roundtrip(&mut client).unwrap();
+        assert_eq!(
+            client.decoration_modes[&1],
+            zxdg_toplevel_decoration_v1::Mode::ServerSide as u32
+        );
+        inspect(&sender, |state| {
+            let layout = state.workspace_layout(0);
+            let (window, rect, fullscreen, _, _, _) = &layout[0];
+            let bar = crate::workspaces::titlebar_rect(window, *rect, *fullscreen).unwrap();
+            assert_eq!(bar.size.h, 34);
+            assert_eq!(bar.loc.y + bar.size.h, rect.loc.y);
+            state.host_focused = true;
+            state.pointer_location = (
+                f64::from(bar.loc.x + bar.size.w - 36),
+                f64::from(bar.loc.y + 17),
+            )
+                .into();
+            assert!(state.handle_compositor_button(
+                0x110,
+                smithay::backend::input::ButtonState::Pressed,
+                1
+            ));
+            assert!(state.workspaces[0].maximized.is_some());
+            state.handle_compositor_button(
+                0x110,
+                smithay::backend::input::ButtonState::Released,
+                2,
+            );
+        });
+        top.set_app_id("other.application".into());
+        queue.roundtrip(&mut client).unwrap();
+        queue.roundtrip(&mut client).unwrap();
+        assert_eq!(
+            client.decoration_modes[&1],
+            zxdg_toplevel_decoration_v1::Mode::ClientSide as u32
+        );
+    });
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while !thread.is_finished() {
+        assert!(
+            Instant::now() < deadline,
+            "titlebar protocol test timed out"
+        );
+        event_loop
+            .dispatch(Duration::from_millis(2), &mut state)
+            .unwrap();
+        while let Ok(inspect) = requests.try_recv() {
+            inspect(&mut state);
+        }
+        state.space.refresh();
+        state.display_handle.flush_clients().unwrap();
+    }
+    thread.join().unwrap();
+}

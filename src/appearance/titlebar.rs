@@ -8,6 +8,10 @@ use smithay::{
 };
 use std::collections::VecDeque;
 
+fn bgra(rgba: [u8; 4]) -> [u8; 4] {
+    [rgba[2], rgba[1], rgba[0], rgba[3]]
+}
+
 struct Entry {
     title: String,
     width: i32,
@@ -91,7 +95,7 @@ impl Titlebars {
         }
         let mut pixels = vec![0u8; width as usize * 34 * 4];
         for px in pixels.as_chunks_mut::<4>().0 {
-            px.copy_from_slice(&bg);
+            px.copy_from_slice(&bgra(bg));
         }
         if let Some(index) = hovered {
             let right = width - i32::from(index) * 24;
@@ -103,7 +107,7 @@ impl Titlebars {
             for y in 5..29 {
                 for x in (right - 23).max(0)..right.min(width) {
                     let i = (y as usize * width as usize + x as usize) * 4;
-                    pixels[i..i + 4].copy_from_slice(&color);
+                    pixels[i..i + 4].copy_from_slice(&bgra(color));
                 }
             }
         }
@@ -126,7 +130,7 @@ impl Titlebars {
                     }
                     let i = (yy as usize * width as usize + xx as usize) * 4;
                     let alpha = u32::from(a);
-                    for (n, v) in [r, g, b].into_iter().enumerate() {
+                    for (n, v) in [(2, r), (1, g), (0, b)] {
                         pixels[i + n] = ((u32::from(v) * alpha
                             + u32::from(pixels[i + n]) * (255 - alpha))
                             / 255) as u8;
@@ -138,7 +142,7 @@ impl Titlebars {
         let mut point = |x: i32, y: i32| {
             if x >= 0 && x < width && (0..34).contains(&y) {
                 let i = (y as usize * width as usize + x as usize) * 4;
-                pixels[i..i + 4].copy_from_slice(&self.foreground);
+                pixels[i..i + 4].copy_from_slice(&bgra(self.foreground));
             }
         };
         for x in 0..10 {
@@ -198,6 +202,14 @@ impl Titlebars {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn argb8888_memory_bytes_are_bgra() {
+        assert_eq!(
+            super::bgra([0x12, 0x34, 0x56, 0x78]),
+            [0x56, 0x34, 0x12, 0x78]
+        );
+    }
+
     #[test]
     fn bundled_theme_resolves_for_titlebar() {
         let titlebars = super::Titlebars::default();

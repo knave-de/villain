@@ -163,7 +163,68 @@ impl Villain {
                 return true;
             }
         }
+        if button == 0x110
+            && state == ButtonState::Pressed
+            && self.handle_gallery_titlebar(button, time)
+        {
+            return true;
+        }
         self.try_start_edge_resize(button, state) || self.try_start_split_drag(button, state, time)
+    }
+
+    fn handle_gallery_titlebar(&mut self, button: u32, time: u32) -> bool {
+        if !self.can_start_interaction() || self.layer_under_pointer(true).is_some() {
+            return false;
+        }
+        let hit = self
+            .workspace_layout(self.active_workspace)
+            .into_iter()
+            .rev()
+            .find_map(|(window, rect, fullscreen, maximized, _, visible)| {
+                if !visible {
+                    return None;
+                }
+                let bar = crate::workspaces::titlebar_rect(&window, rect, fullscreen)?;
+                bar.to_f64()
+                    .contains(self.pointer_location)
+                    .then_some((window, bar, maximized))
+            });
+        let Some((window, bar, maximized)) = hit else {
+            return false;
+        };
+        self.focus_managed_window(&window);
+        self.swallowed_buttons.insert(button);
+        let from_right = f64::from(bar.loc.x + bar.size.w) - self.pointer_location.x;
+        if from_right <= 24.0 {
+            self.apply_window_action(&window, crate::workspaces::WindowAction::Close);
+        } else if from_right <= 48.0 {
+            self.set_window_maximized(&window, !maximized);
+        } else if from_right <= 72.0 {
+            let _ = self.toggle_floating_focused();
+        } else if from_right <= 96.0 {
+            self.apply_window_action(&window, crate::workspaces::WindowAction::Minimize);
+        } else if let Some(id) = self.window_id(&window) {
+            let double = self
+                .titlebar_click
+                .is_some_and(|(previous, when, location)| {
+                    previous == id
+                        && time.wrapping_sub(when) <= 400
+                        && (location.x - self.pointer_location.x).abs() <= 5.0
+                        && (location.y - self.pointer_location.y).abs() <= 5.0
+                });
+            self.titlebar_click = if double {
+                None
+            } else {
+                Some((id, time, self.pointer_location))
+            };
+            if double {
+                self.set_window_maximized(&window, !maximized);
+            } else {
+                let _ = self.begin_window_interaction(WindowTarget::Window(id), false, None);
+            }
+        }
+        self.request_repaint();
+        true
     }
 
     pub fn x11_grab_button_matches(&self, button: u32) -> bool {
