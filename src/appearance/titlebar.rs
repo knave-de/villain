@@ -66,6 +66,10 @@ fn stroke_path(
     }
 }
 
+fn control_origin(width: i32, index: i32) -> (f32, f32) {
+    ((width - 24 - index * 24) as f32, 10.4)
+}
+
 struct Entry {
     title: String,
     width: i32,
@@ -196,7 +200,8 @@ impl Titlebars {
         // The control actions stay in their existing slots and retain their
         // existing hit regions; only the cached buffer artwork changes.
         let glyph = self.foreground;
-        let center = |slot: i32| (width as f32 - 84.0 + slot as f32 * 24.0, 10.4);
+        // Slots are indexed from the right edge, matching hover and click hit testing.
+        let center = |slot: i32| control_origin(width, slot);
         stroke_path(
             &mut pixels,
             width,
@@ -345,6 +350,18 @@ impl Titlebars {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn control_glyphs_are_centered_in_right_to_left_hit_slots() {
+        let width = 800;
+        for index in 0..4 {
+            let (origin, _) = super::control_origin(width, index);
+            let glyph_center = origin + 12.0;
+            let hit_left = (width - (index + 1) * 24) as f32;
+            let hit_right = (width - index * 24) as f32;
+            assert_eq!(glyph_center, (hit_left + hit_right) / 2.0);
+        }
+    }
+
     #[test]
     fn argb8888_memory_bytes_are_bgra() {
         assert_eq!(
