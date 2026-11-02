@@ -166,6 +166,15 @@ mod tests {
         );
         assert_eq!(moved.loc, (132, 20).into());
         assert_eq!(moved.size, smaller.size);
+        let moved = move_floating_geometry(
+            smaller,
+            visible,
+            output,
+            unconstrained,
+            unconstrained,
+            (0, 32),
+        );
+        assert_eq!(moved.loc, (10, 52).into());
     }
 
     #[test]

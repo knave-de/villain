@@ -177,7 +177,13 @@ fn move_floating_geometry(
     let mut moved = visible;
     moved.loc.x = moved.loc.x.saturating_add(delta.0);
     moved.loc.y = moved.loc.y.saturating_add(delta.1);
-    saved.loc = constrain_geometry(moved, output, min, max).loc;
+    let loc = constrain_geometry(moved, output, min, max).loc;
+    if delta.0 != 0 {
+        saved.loc.x = loc.x;
+    }
+    if delta.1 != 0 {
+        saved.loc.y = loc.y;
+    }
     saved
 }
 
