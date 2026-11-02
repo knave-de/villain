@@ -109,6 +109,19 @@ pub(super) struct Titlebars {
 }
 impl Default for Titlebars {
     fn default() -> Self {
+        let profile_font_init = tracing::enabled!(target: "villain::perf", tracing::Level::DEBUG);
+        let font_init_started = profile_font_init.then(Instant::now);
+        let fonts = FontSystem::new();
+        if let Some(started) = font_init_started {
+            let elapsed_us = started.elapsed().as_micros();
+            tracing::debug!(
+                target: "villain::perf",
+                event = "titlebar_font_system_initialized",
+                elapsed_us,
+                slow = elapsed_us >= SLOW_TITLEBAR_RASTER_US,
+                "titlebar font system initialized"
+            );
+        }
         let mut scene = Scene::new(Element::new(1, Widget::Panel)).expect("valid titlebar scene");
         scene
             .set_stylesheet("panel { background-color: var(--surface-hover); color: var(--text); }")
@@ -123,7 +136,7 @@ impl Default for Titlebars {
             .expect("titlebar background");
         let fg = style.text.color;
         Self {
-            fonts: FontSystem::new(),
+            fonts,
             glyphs: SwashCache::new(),
             entries: VecDeque::new(),
             background: [bg.red, bg.green, bg.blue, 255],

@@ -250,6 +250,8 @@ fn render_frame(state: &mut Villain) {
     let frame_started = profile.then(Instant::now);
     let mut bind_us = 0;
     let mut elements_us = 0;
+    let mut cursor_us = 0;
+    let mut overview_us = 0;
     let mut night_light_us = 0;
     let mut output_us = 0;
     let mut submit_us = 0;
@@ -269,10 +271,15 @@ fn render_frame(state: &mut Villain) {
             now,
             state.config.output_scale,
         );
+        if let Some(started) = stage_started {
+            cursor_us = started.elapsed().as_micros();
+        }
+        let stage_started = profile.then(Instant::now);
         let elements = crate::overview_render::elements(state, renderer, cursor_elements)?;
         if let Some(started) = stage_started {
-            elements_us = started.elapsed().as_micros();
+            overview_us = started.elapsed().as_micros();
         }
+        elements_us = cursor_us + overview_us;
         let stage_started = profile.then(Instant::now);
         let elements = state
             .night_light
@@ -308,9 +315,17 @@ fn render_frame(state: &mut Villain) {
     if let Some(started) = frame_started {
         let frame_us = started.elapsed().as_micros();
         let slow_frame = frame_us >= SLOW_FRAME_US;
-        let slow_stage = [bind_us, elements_us, night_light_us, output_us, submit_us]
-            .into_iter()
-            .any(|duration| duration >= SLOW_FRAME_STAGE_US);
+        let slow_stage = [
+            bind_us,
+            elements_us,
+            cursor_us,
+            overview_us,
+            night_light_us,
+            output_us,
+            submit_us,
+        ]
+        .into_iter()
+        .any(|duration| duration >= SLOW_FRAME_STAGE_US);
         if slow_frame || slow_stage {
             tracing::debug!(
                 target: "villain::perf",
@@ -318,6 +333,8 @@ fn render_frame(state: &mut Villain) {
                 frame_us,
                 bind_us,
                 elements_us,
+                cursor_us,
+                overview_us,
                 night_light_us,
                 output_us,
                 submit_us,

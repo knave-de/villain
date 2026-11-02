@@ -207,7 +207,8 @@ impl Villain {
                 smithay::wayland::foreign_toplevel_list::ForeignToplevelListState::new::<Self>(
                     &display_handle,
                 ),
-            appearance_renderer: Default::default(),
+            appearance_renderer: crate::appearance::render::EffectsRenderer::with_warmed_titlebars(
+            ),
             night_light: Default::default(),
 
             capture: crate::capture::CaptureState::default(),
