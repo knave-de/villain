@@ -1011,6 +1011,12 @@ impl Villain {
             true
         });
         if !changed {
+            // set_mode and unset_mode each require an xdg_surface.configure
+            // response, even when the effective decoration mode is unchanged.
+            // Avoid a geometry relayout, but still complete the protocol round.
+            if toplevel.is_initial_configure_sent() {
+                toplevel.send_configure();
+            }
             return;
         }
         toplevel.with_pending_state(|state| state.decoration_mode = Some(mode));

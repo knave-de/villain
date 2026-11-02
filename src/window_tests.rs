@@ -1753,13 +1753,19 @@ fn xdg_decoration_negotiation_and_geometry() {
             "changing one window's decoration mode must not configure its sibling"
         );
         let client_side_configures = client.decoration_configure_counts[&1];
+        let client_side_toplevel_configures = client.configure_counts[&1];
         decoration.set_mode(zxdg_toplevel_decoration_v1::Mode::ClientSide);
         surface.commit();
         queue.roundtrip(&mut client).unwrap();
         queue.roundtrip(&mut client).unwrap();
         assert_eq!(
+            client.configure_counts[&1],
+            client_side_toplevel_configures + 1,
+            "repeating set_mode must still receive an xdg_surface.configure response"
+        );
+        assert_eq!(
             client.decoration_configure_counts[&1], client_side_configures,
-            "repeating the negotiated mode must not configure again"
+            "repeating the negotiated mode must not resend the decoration mode"
         );
         inspect(&sender, |state| {
             let (window, rect, fullscreen, _, _, _) = &state.workspace_layout(0)[0];
@@ -1773,10 +1779,16 @@ fn xdg_decoration_negotiation_and_geometry() {
             client.decoration_modes[&1],
             zxdg_toplevel_decoration_v1::Mode::ServerSide as u32
         );
+        let server_side_configures = client.configure_counts[&1];
         decoration.unset_mode();
         surface.commit();
         queue.roundtrip(&mut client).unwrap();
         queue.roundtrip(&mut client).unwrap();
+        assert_eq!(
+            client.configure_counts[&1],
+            server_side_configures + 1,
+            "unset_mode must receive an xdg_surface.configure response even when unchanged"
+        );
         assert_eq!(
             client.decoration_modes[&1],
             zxdg_toplevel_decoration_v1::Mode::ServerSide as u32
