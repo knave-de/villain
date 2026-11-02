@@ -321,6 +321,7 @@ impl Villain {
 
     fn set_overview_visible(&mut self, visible: bool) {
         if self.overview_visible != visible {
+            self.window_menu = None;
             self.cancel_swipe(0);
             self.cancel_workspace_motion();
             self.release_pointer_buttons();

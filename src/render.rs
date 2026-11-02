@@ -111,6 +111,7 @@ pub fn init_winit(
         .handle()
         .insert_source(winit_source, move |event, _, state| match event {
             WinitEvent::Resized { size, .. } => {
+                state.window_menu = None;
                 state.cancel_swipe(0);
                 state.cancel_workspace_motion();
                 state.output_size = output_logical_size(size, state.config.output_scale);
@@ -172,6 +173,9 @@ pub fn init_winit(
                 state.update_interaction_cursor();
             }
             WinitEvent::Input(InputEvent::PointerAxis { event }) => {
+                if state.window_menu.is_some() {
+                    return;
+                }
                 state.finish_workspace_motion();
                 if state.screenshot.intercepting_pointer() {
                     return;
@@ -198,6 +202,7 @@ pub fn init_winit(
             WinitEvent::Focus(focused) => {
                 state.host_focused = focused;
                 if !focused {
+                    state.window_menu = None;
                     state.cancel_swipe(0);
                     state.cancel_workspace_motion();
                     crate::screenshot::cancel(state, false);

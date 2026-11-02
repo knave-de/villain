@@ -51,6 +51,7 @@ use crate::config::RuntimeConfig;
 use crate::cursor::CursorState;
 use crate::dispatch::Dispatch;
 use crate::workspaces::Workspace;
+use knave_desktop_api::WindowId;
 use knave_desktop_api::XWaylandStatus;
 
 /// All mutable compositor state lives here.
@@ -153,10 +154,19 @@ pub struct Villain {
         u32,
         smithay::utils::Point<f64, smithay::utils::Logical>,
     )>,
+    pub(crate) window_menu: Option<WindowMenuState>,
     pub repaint_needed: bool,
     pub frame_clock: crate::frame_clock::FrameClock,
     cursor_timer_generation: u64,
     pub(crate) loop_handle: LoopHandle<'static, Self>,
+}
+
+pub(crate) struct WindowMenuState {
+    pub(crate) window_id: WindowId,
+    pub(crate) rect: smithay::utils::Rectangle<i32, smithay::utils::Logical>,
+    pub(crate) hovered: Option<u8>,
+    pub(crate) maximized: bool,
+    pub(crate) tiled: bool,
 }
 
 impl Villain {
@@ -304,6 +314,7 @@ impl Villain {
             swallowed_buttons: Default::default(),
             pressed_buttons: Default::default(),
             titlebar_click: None,
+            window_menu: None,
             repaint_needed: true,
             frame_clock: Default::default(),
             cursor_timer_generation: 0,

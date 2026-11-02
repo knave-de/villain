@@ -223,6 +223,7 @@ pub fn init(
         .handle()
         .insert_source(notifier, move |event, _, state| match event {
             SessionEvent::PauseSession => {
+                state.window_menu = None;
                 state.cancel_swipe(0);
                 state.cancel_workspace_motion();
                 input.suspend();
@@ -422,6 +423,9 @@ fn process_input(event: InputEvent<LibinputInputBackend>, state: &mut Villain) {
             state.update_interaction_cursor();
         }
         InputEvent::PointerAxis { event } => {
+            if state.window_menu.is_some() {
+                return;
+            }
             state.finish_workspace_motion();
             if state.screenshot.intercepting_pointer() {
                 return;

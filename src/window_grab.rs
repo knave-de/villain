@@ -114,6 +114,17 @@ pub(crate) struct Interaction {
     pub(crate) moved: bool,
 }
 
+fn window_menu_row(
+    rect: smithay::utils::Rectangle<i32, Logical>,
+    location: Point<f64, Logical>,
+) -> Option<u8> {
+    if !rect.to_f64().contains(location) {
+        return None;
+    }
+    let row = ((location.y - f64::from(rect.loc.y)) / 30.0) as u8;
+    (row < 4).then_some(row)
+}
+
 impl Villain {
     /// Shared Winit/libinput button path, before any client delivery.
     pub(crate) fn handle_compositor_button(
@@ -123,6 +134,34 @@ impl Villain {
         time: u32,
     ) -> bool {
         self.finish_workspace_motion();
+
+        if self.window_menu.is_some() {
+            if state == ButtonState::Released {
+                let swallowed = self.swallowed_buttons.remove(&button);
+                self.pressed_buttons.remove(&button);
+                return swallowed;
+            }
+            if state == ButtonState::Pressed {
+                self.pressed_buttons.insert(button);
+                self.swallowed_buttons.insert(button);
+                let inside = self
+                    .window_menu
+                    .as_ref()
+                    .is_some_and(|menu| menu.rect.to_f64().contains(self.pointer_location));
+                let row = self.window_menu.as_ref().and_then(|menu| {
+                    (button == 0x110 && inside)
+                        .then(|| window_menu_row(menu.rect, self.pointer_location))
+                        .flatten()
+                });
+                if let Some(row) = row {
+                    self.activate_window_menu_item(row);
+                } else if !inside {
+                    self.window_menu = None;
+                    self.request_repaint();
+                }
+                return true;
+            }
+        }
 
         if state == ButtonState::Pressed {
             self.swallowed_buttons.remove(&button);
@@ -138,6 +177,10 @@ impl Villain {
             let mods = self.keyboard.modifier_state();
             if mods.logo || mods.alt {
                 self.pending_modifier = None;
+            }
+            if button == 0x111 && mods.logo && self.open_window_menu_at_pointer() {
+                self.swallowed_buttons.insert(button);
+                return true;
             }
             if self.can_start_interaction()
                 && self.layer_under_pointer(true).is_none()
@@ -163,6 +206,11 @@ impl Villain {
                 return true;
             }
         }
+        if button == 0x111 && state == ButtonState::Pressed && self.open_window_menu_from_titlebar()
+        {
+            self.swallowed_buttons.insert(button);
+            return true;
+        }
         if button == 0x110
             && state == ButtonState::Pressed
             && self.handle_gallery_titlebar(button, time)
@@ -170,6 +218,165 @@ impl Villain {
             return true;
         }
         self.try_start_edge_resize(button, state) || self.try_start_split_drag(button, state, time)
+    }
+
+    fn open_window_menu_from_titlebar(&mut self) -> bool {
+        if !self.can_open_window_menu(false) || self.layer_under_pointer(true).is_some() {
+            return false;
+        }
+        let hit = self
+            .workspace_layout(self.active_workspace)
+            .into_iter()
+            .rev()
+            .find_map(|(window, rect, fullscreen, maximized, tiled, visible)| {
+                if !visible {
+                    return None;
+                }
+                let bar = crate::workspaces::titlebar_rect(&window, rect, fullscreen)?;
+                bar.to_f64()
+                    .contains(self.pointer_location)
+                    .then_some((window, bar, maximized, tiled))
+            });
+        let Some((window, bar, maximized, tiled)) = hit else {
+            return false;
+        };
+        self.open_window_menu(window, self.pointer_location, maximized, tiled, bar);
+        true
+    }
+
+    fn open_window_menu_at_pointer(&mut self) -> bool {
+        if !self.can_open_window_menu(false) || self.layer_under_pointer(true).is_some() {
+            return false;
+        }
+        let Some((window, origin)) = self.input_window_at_pointer() else {
+            return false;
+        };
+        let Some((surface, _)) = window.surface_under(
+            self.pointer_location - origin.to_f64(),
+            smithay::desktop::WindowSurfaceType::ALL,
+        ) else {
+            return false;
+        };
+        if std::iter::successors(Some(surface), smithay::wayland::compositor::get_parent)
+            .any(|surface| self.popups.find_popup(&surface).is_some())
+        {
+            return false;
+        }
+        let Some((_, rect, fullscreen, maximized, tiled, visible)) = self
+            .workspace_layout(self.active_workspace)
+            .into_iter()
+            .find(|entry| entry.0 == window)
+        else {
+            return false;
+        };
+        if !visible || fullscreen {
+            return false;
+        }
+        self.open_window_menu(window, self.pointer_location, maximized, tiled, rect);
+        true
+    }
+
+    pub(crate) fn open_window_menu(
+        &mut self,
+        window: Window,
+        anchor: smithay::utils::Point<f64, smithay::utils::Logical>,
+        maximized: bool,
+        tiled: bool,
+        _bounds: smithay::utils::Rectangle<i32, smithay::utils::Logical>,
+    ) {
+        let Some(window_id) = self.window_id(&window) else {
+            return;
+        };
+        self.focus_managed_window(&window);
+        let width = self.output_size.w.clamp(1, 200);
+        let height = self.output_size.h.clamp(1, 120);
+        let x = (anchor.x.floor() as i32).clamp(0, (self.output_size.w - width).max(0));
+        let y = (anchor.y.floor() as i32).clamp(0, (self.output_size.h - height).max(0));
+        let rect = smithay::utils::Rectangle::new((x, y).into(), (width, height).into());
+        self.window_menu = Some(crate::state::WindowMenuState {
+            window_id,
+            rect,
+            hovered: None,
+            maximized,
+            tiled,
+        });
+        self.request_repaint();
+    }
+
+    pub(crate) fn can_open_window_menu(&self, allow_pointer_grab: bool) -> bool {
+        self.host_focused
+            && self.interaction.is_none()
+            && !self.keyboard.is_grabbed()
+            && (allow_pointer_grab || !self.pointer.is_grabbed())
+            && self.exclusive_layer_focus().is_none()
+            && !self.overview_visible
+            && !self.overview_mapped()
+            && !self.screenshot.intercepting_pointer()
+    }
+
+    pub(crate) fn activate_window_menu_item(&mut self, row: u8) {
+        let Some(menu) = self.window_menu.take() else {
+            return;
+        };
+        let Some(window) = self.capture_window(menu.window_id) else {
+            self.request_repaint();
+            return;
+        };
+        match row {
+            0 => self.apply_window_action(&window, crate::workspaces::WindowAction::Minimize),
+            1 => {
+                if self.focus_managed_window(&window) {
+                    let _ = self.toggle_floating_focused();
+                }
+            }
+            2 => self.set_window_maximized(&window, !menu.maximized),
+            3 => self.apply_window_action(&window, crate::workspaces::WindowAction::Close),
+            _ => {}
+        }
+        self.request_repaint();
+    }
+
+    pub(crate) fn handle_window_menu_key(&mut self, key: u32, pressed: bool) -> bool {
+        let Some(menu) = self.window_menu.as_mut() else {
+            return false;
+        };
+        if !pressed {
+            return true;
+        }
+        match key {
+            x if x == smithay::input::keyboard::keysyms::KEY_Escape => {
+                self.window_menu = None;
+            }
+            x if x == smithay::input::keyboard::keysyms::KEY_Up => {
+                let row = menu.hovered.unwrap_or(0).saturating_sub(1);
+                menu.hovered = Some(row);
+            }
+            x if x == smithay::input::keyboard::keysyms::KEY_Down => {
+                let row = menu.hovered.map_or(0, |row| (row + 1).min(3));
+                menu.hovered = Some(row);
+            }
+            x if x == smithay::input::keyboard::keysyms::KEY_Return
+                || x == smithay::input::keyboard::keysyms::KEY_KP_Enter =>
+            {
+                let row = menu.hovered.unwrap_or(0);
+                self.activate_window_menu_item(row);
+                return true;
+            }
+            _ => {}
+        }
+        self.request_repaint();
+        true
+    }
+
+    pub(crate) fn update_window_menu_hover(&mut self) {
+        if let Some(menu) = self.window_menu.as_mut() {
+            let hovered = menu.rect;
+            let hovered = window_menu_row(hovered, self.pointer_location);
+            if menu.hovered != hovered {
+                menu.hovered = hovered;
+                self.request_repaint();
+            }
+        }
     }
 
     fn handle_gallery_titlebar(&mut self, button: u32, time: u32) -> bool {
@@ -916,6 +1123,16 @@ impl PointerGrab<Villain> for WindowGrab {
 mod tests {
     use super::*;
     use crate::workspaces::constrain_geometry;
+    #[test]
+    fn window_menu_rows_cover_exactly_four_visible_rows() {
+        let rect = Rectangle::new((20, 30).into(), (200, 120).into());
+        assert_eq!(window_menu_row(rect, (20.0, 30.0).into()), Some(0));
+        assert_eq!(window_menu_row(rect, (219.0, 59.9).into()), Some(0));
+        assert_eq!(window_menu_row(rect, (20.0, 60.0).into()), Some(1));
+        assert_eq!(window_menu_row(rect, (20.0, 149.9).into()), Some(3));
+        assert_eq!(window_menu_row(rect, (20.0, 150.0).into()), None);
+        assert_eq!(window_menu_row(rect, (220.0, 60.0).into()), None);
+    }
     #[test]
     fn resizing_to_output_bounds_keeps_the_opposite_edge_fixed() {
         let initial = Geometry::new((100, 100).into(), (300, 200).into());

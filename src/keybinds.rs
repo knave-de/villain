@@ -606,6 +606,17 @@ pub(crate) fn handle_keyboard_key(
     let serial = SERIAL_COUNTER.next_serial();
     let (result, mods_changed) =
         keyboard.input_intercept(state, code, key_state, |state, mods, key| {
+            if state.window_menu.is_some() {
+                if pressed {
+                    state.suppressed_keys.insert(code);
+                    state.handle_window_menu_key(key.modified_sym().raw(), true);
+                    return FilterResult::Intercept(None);
+                }
+                if state.suppressed_keys.remove(&code) {
+                    state.handle_window_menu_key(key.modified_sym().raw(), false);
+                    return FilterResult::Intercept(None);
+                }
+            }
             let inhibited = shortcuts_inhibited(state);
             if !pressed
                 && let Some((app_id, session_handle, shortcut_id)) =

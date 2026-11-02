@@ -4,6 +4,8 @@ pub(crate) use paint::normalized_radii;
 mod paint;
 #[path = "titlebar.rs"]
 mod titlebar;
+#[path = "window_menu.rs"]
+mod window_menu;
 use crate::{focus::KeyboardFocus, state::Villain};
 use knave_config::{
     WindowAppearance,
@@ -94,6 +96,7 @@ struct CachedScene {
 pub(crate) struct EffectsRenderer {
     programs: Option<(GlesPixelProgram, GlesTexProgram)>,
     titlebars: Option<titlebar::Titlebars>,
+    window_menus: Option<window_menu::WindowMenus>,
     scenes: VecDeque<CachedScene>,
     panes: VecDeque<CachedPane>,
 }
@@ -235,6 +238,34 @@ impl EffectsRenderer {
         target_scale: f64,
     ) -> Result<Vec<EffectElement>, EffectError> {
         let mut elements = self.base_scene(state, renderer, workspace, layers, target_scale)?;
+        if workspace == state.active_workspace
+            && layers == SceneLayers::All
+            && let Some(menu) = state.window_menu.as_ref()
+            && let Some(buffer) = self
+                .window_menus
+                .get_or_insert_with(window_menu::WindowMenus::default)
+                .buffer(
+                    menu.rect.size.w,
+                    menu.rect.size.h,
+                    menu.hovered,
+                    menu.maximized,
+                    menu.tiled,
+                )
+        {
+            let location: smithay::utils::Point<i32, Physical> =
+                menu.rect.loc.to_physical_precise_round(target_scale);
+            let element = MemoryRenderBufferRenderElement::from_buffer(
+                renderer,
+                (f64::from(location.x), f64::from(location.y)),
+                buffer,
+                None,
+                None,
+                None,
+                Kind::Unspecified,
+            )
+            .map_err(EffectError::Renderer)?;
+            elements.push(EffectElement::Memory(element));
+        }
         if workspace == state.active_workspace
             && layers == SceneLayers::All
             && let Some(drag) = &state.interaction

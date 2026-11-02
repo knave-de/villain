@@ -1380,6 +1380,7 @@ impl Villain {
 
     pub(crate) fn switch_workspace_immediate(&mut self, index: usize) {
         self.cancel_swipe(0);
+        self.window_menu = None;
         if !self.ensure_workspace_exists(index) {
             return;
         }
@@ -2380,6 +2381,10 @@ impl Villain {
     /// move keyboard focus to the window under the pointer when focus follow
     /// is enabled (hover-to-focus; otherwise focus switches on click only).
     pub fn refresh_pointer_motion(&mut self, time: u32) {
+        if self.window_menu.is_some() {
+            self.update_window_menu_hover();
+            return;
+        }
         if self.config.input.focus_follows_mouse {
             self.refresh_pointer_and_focus(time);
         } else {
@@ -2458,6 +2463,13 @@ impl Villain {
     }
 
     fn remove_managed_window(&mut self, target: &Window) {
+        if self.window_id(target).is_some_and(|id| {
+            self.window_menu
+                .as_ref()
+                .is_some_and(|menu| menu.window_id == id)
+        }) {
+            self.window_menu = None;
+        }
         self.appearance_renderer.clear();
         for workspace in &mut self.workspaces {
             let removed: Vec<_> = workspace

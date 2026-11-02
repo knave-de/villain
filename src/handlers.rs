@@ -28,14 +28,17 @@ use smithay::{
     input::Seat,
     reexports::wayland_server::protocol::wl_seat,
     utils::Serial,
-    wayland::selection::{
-        SelectionHandler,
-        data_device::{
-            ClientDndGrabHandler, DataDeviceHandler, DataDeviceState, ServerDndGrabHandler,
+    wayland::{
+        seat::WaylandFocus,
+        selection::{
+            SelectionHandler,
+            data_device::{
+                ClientDndGrabHandler, DataDeviceHandler, DataDeviceState, ServerDndGrabHandler,
+            },
+            ext_data_control,
+            primary_selection::{PrimarySelectionHandler, PrimarySelectionState},
+            wlr_data_control,
         },
-        ext_data_control,
-        primary_selection::{PrimarySelectionHandler, PrimarySelectionState},
-        wlr_data_control,
     },
     xwayland::XWaylandClientData,
 };
@@ -715,6 +718,49 @@ impl XdgShellHandler for Villain {
         if let Some(window) = self.window_for_surface(surface.wl_surface()) {
             self.apply_window_action(&window, WindowAction::Minimize);
         }
+    }
+
+    fn show_window_menu(
+        &mut self,
+        surface: ToplevelSurface,
+        seat: wl_seat::WlSeat,
+        serial: Serial,
+        location: smithay::utils::Point<i32, smithay::utils::Logical>,
+    ) {
+        if !self.seat.owns(&seat)
+            || !self.pointer.has_grab(serial)
+            || !self.can_open_window_menu(true)
+        {
+            return;
+        }
+        let Some(window) = self.window_for_surface(surface.wl_surface()) else {
+            return;
+        };
+        let root = self
+            .pointer
+            .grab_start_data()
+            .and_then(|start| start.focus.map(|(focused, _)| focused))
+            .and_then(|focused| {
+                std::iter::successors(Some(focused), smithay::wayland::compositor::get_parent)
+                    .last()
+            });
+        if root != window.wl_surface().map(|surface| surface.into_owned()) {
+            return;
+        }
+        let Some((_, rect, fullscreen, maximized, tiled, visible)) = self
+            .workspace_layout(self.active_workspace)
+            .into_iter()
+            .find(|entry| entry.0 == window)
+        else {
+            return;
+        };
+        if !visible || fullscreen || self.layer_under_pointer(true).is_some() {
+            return;
+        }
+        let origin = self.space.element_location(&window).unwrap_or(rect.loc);
+        let anchor =
+            smithay::utils::Point::from((origin.x + location.x, origin.y + location.y)).to_f64();
+        self.open_window_menu(window, anchor, maximized, tiled, rect);
     }
 
     fn new_popup(&mut self, surface: PopupSurface, positioner: PositionerState) {
