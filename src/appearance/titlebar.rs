@@ -196,17 +196,15 @@ impl Titlebars {
                 }
             }
         });
-        // Match the titlebar glyph geometry from knave-mockup's 24px SVGs.
-        // The control actions stay in their existing slots and retain their
-        // existing hit regions; only the cached buffer artwork changes.
+        // Hit testing counts slots from the right: close, maximize, float,
+        // minimize. Rendering places their matching glyphs in those slots.
         let glyph = self.foreground;
-        // Slots are indexed from the right edge, matching hover and click hit testing.
         let center = |slot: i32| control_origin(width, slot);
         stroke_path(
             &mut pixels,
             width,
             glyph,
-            center(0),
+            center(3),
             &[(5.0, 12.0), (19.0, 12.0)],
         );
         if tiled {
@@ -214,7 +212,7 @@ impl Titlebars {
                 &mut pixels,
                 width,
                 glyph,
-                center(1),
+                center(2),
                 &[
                     (3.0, 3.0),
                     (15.0, 3.0),
@@ -227,7 +225,7 @@ impl Titlebars {
                 &mut pixels,
                 width,
                 glyph,
-                center(1),
+                center(2),
                 &[
                     (9.0, 9.0),
                     (21.0, 9.0),
@@ -242,7 +240,7 @@ impl Titlebars {
                 &mut pixels,
                 width,
                 glyph,
-                center(1),
+                center(2),
                 &[
                     (4.0, 4.0),
                     (20.0, 4.0),
@@ -255,14 +253,14 @@ impl Titlebars {
                 &mut pixels,
                 width,
                 glyph,
-                center(1),
+                center(2),
                 &[(12.0, 4.0), (12.0, 20.0)],
             );
             stroke_path(
                 &mut pixels,
                 width,
                 glyph,
-                center(1),
+                center(2),
                 &[(4.0, 12.0), (20.0, 12.0)],
             );
         }
@@ -272,7 +270,7 @@ impl Titlebars {
                 &mut pixels,
                 width,
                 glyph,
-                center(2),
+                center(1),
                 &[
                     (8.0, 4.0),
                     (20.0, 4.0),
@@ -285,14 +283,14 @@ impl Titlebars {
                 &mut pixels,
                 width,
                 glyph,
-                center(2),
+                center(1),
                 &[(4.0, 8.0), (4.0, 20.0), (16.0, 20.0), (16.0, 16.0)],
             );
             stroke_path(
                 &mut pixels,
                 width,
                 glyph,
-                center(2),
+                center(1),
                 &[(4.0, 8.0), (8.0, 8.0)],
             );
         } else {
@@ -300,7 +298,7 @@ impl Titlebars {
                 &mut pixels,
                 width,
                 glyph,
-                center(2),
+                center(1),
                 &[
                     (5.0, 5.0),
                     (19.0, 5.0),
@@ -314,14 +312,14 @@ impl Titlebars {
             &mut pixels,
             width,
             glyph,
-            center(3),
+            center(0),
             &[(6.0, 6.0), (18.0, 18.0)],
         );
         stroke_path(
             &mut pixels,
             width,
             glyph,
-            center(3),
+            center(0),
             &[(6.0, 18.0), (18.0, 6.0)],
         );
         let buffer = MemoryRenderBuffer::from_slice(
@@ -351,14 +349,22 @@ impl Titlebars {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn control_glyphs_are_centered_in_right_to_left_hit_slots() {
+    fn controls_match_actions_and_are_centered_in_hit_slots() {
         let width = 800;
-        for index in 0..4 {
+        // Pointer distances and rendering use the same right-edge slots:
+        // close, maximize, float, minimize.
+        let controls = ["close", "maximize", "float", "minimize"];
+        for (index, control) in controls.into_iter().enumerate() {
+            let index = index as i32;
             let (origin, _) = super::control_origin(width, index);
             let glyph_center = origin + 12.0;
             let hit_left = (width - (index + 1) * 24) as f32;
             let hit_right = (width - index * 24) as f32;
             assert_eq!(glyph_center, (hit_left + hit_right) / 2.0);
+            assert_eq!(
+                control,
+                ["close", "maximize", "float", "minimize"][index as usize]
+            );
         }
     }
 
