@@ -248,6 +248,7 @@ impl EffectsRenderer {
                     menu.rect.size.w,
                     menu.rect.size.h,
                     menu.hovered,
+                    menu.fullscreen,
                     menu.maximized,
                     menu.tiled,
                 )

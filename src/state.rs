@@ -165,6 +165,7 @@ pub(crate) struct WindowMenuState {
     pub(crate) window_id: WindowId,
     pub(crate) rect: smithay::utils::Rectangle<i32, smithay::utils::Logical>,
     pub(crate) hovered: Option<u8>,
+    pub(crate) fullscreen: bool,
     pub(crate) maximized: bool,
     pub(crate) tiled: bool,
 }

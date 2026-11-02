@@ -179,6 +179,7 @@ struct Entry {
     width: i32,
     height: i32,
     hovered: Option<u8>,
+    fullscreen: bool,
     maximized: bool,
     tiled: bool,
     buffer: MemoryRenderBuffer,
@@ -239,6 +240,7 @@ impl WindowMenus {
         width: i32,
         height: i32,
         hovered: Option<u8>,
+        fullscreen: bool,
         maximized: bool,
         tiled: bool,
     ) -> Option<&MemoryRenderBuffer> {
@@ -250,6 +252,7 @@ impl WindowMenus {
             entry.width == width
                 && entry.height == height
                 && entry.hovered == hovered
+                && entry.fullscreen == fullscreen
                 && entry.maximized == maximized
                 && entry.tiled == tiled
         }) {
@@ -288,12 +291,7 @@ impl WindowMenus {
             }
         }
 
-        let labels = [
-            "Minimize",
-            if tiled { "Float window" } else { "Tile window" },
-            if maximized { "Restore" } else { "Maximize" },
-            "Close",
-        ];
+        let labels = menu_labels(fullscreen, maximized, tiled);
         let color = TextColor::rgba(
             self.foreground[0],
             self.foreground[1],
@@ -354,6 +352,7 @@ impl WindowMenus {
             width,
             height,
             hovered,
+            fullscreen,
             maximized,
             tiled,
             buffer,
@@ -362,5 +361,32 @@ impl WindowMenus {
             self.entries.pop_back();
         }
         self.entries.front().map(|entry| &entry.buffer)
+    }
+}
+
+fn menu_labels(fullscreen: bool, maximized: bool, tiled: bool) -> [&'static str; 4] {
+    [
+        "Minimize",
+        if tiled { "Float window" } else { "Tile window" },
+        if fullscreen {
+            "Exit fullscreen"
+        } else if maximized {
+            "Restore"
+        } else {
+            "Maximize"
+        },
+        "Close",
+    ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::menu_labels;
+
+    #[test]
+    fn fullscreen_menu_offers_exit_fullscreen_instead_of_maximize() {
+        assert_eq!(menu_labels(true, true, false)[2], "Exit fullscreen");
+        assert_eq!(menu_labels(false, true, false)[2], "Restore");
+        assert_eq!(menu_labels(false, false, true)[2], "Maximize");
     }
 }

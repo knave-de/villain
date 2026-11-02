@@ -944,6 +944,80 @@ fn wayland_floating_and_fullscreen_requests() {
         at.set_fullscreen(None);
         settle(&mut queue, &mut client);
         assert!(client.configures[&1].fullscreen && client.configures[&1].maximized);
+        let primary_id = find_id(&sender, "primary");
+        inspect(&sender, move |state| {
+            use smithay::backend::input::{ButtonState, KeyState};
+            state.host_focused = true;
+            state.pointer_location = (100.0, 100.0).into();
+            crate::keybinds::handle_keyboard_key(
+                state,
+                smithay::input::keyboard::Keycode::new(133),
+                KeyState::Pressed,
+                30,
+            );
+            assert!(state.handle_compositor_button(0x111, ButtonState::Pressed, 31));
+            let menu = state
+                .window_menu
+                .as_ref()
+                .expect("fullscreen gesture opens menu");
+            assert_eq!(menu.window_id, primary_id);
+            assert!(menu.fullscreen);
+            let rect = menu.rect;
+            state.handle_compositor_button(0x111, ButtonState::Released, 32);
+            state.pointer_location =
+                (f64::from(rect.loc.x + 50), f64::from(rect.loc.y + 75)).into();
+            assert!(state.handle_compositor_button(0x110, ButtonState::Pressed, 33));
+            assert!(state.handle_compositor_button(0x110, ButtonState::Released, 34));
+            crate::keybinds::handle_keyboard_key(
+                state,
+                smithay::input::keyboard::Keycode::new(133),
+                KeyState::Released,
+                35,
+            );
+            assert!(!find(state, "primary").fullscreen);
+            assert!(find(state, "primary").maximized);
+        });
+        settle(&mut queue, &mut client);
+        assert!(!client.configures[&1].fullscreen && client.configures[&1].maximized);
+        at.set_fullscreen(None);
+        settle(&mut queue, &mut client);
+        assert!(client.configures[&1].fullscreen && client.configures[&1].maximized);
+        inspect(&sender, move |state| {
+            use smithay::backend::input::{ButtonState, KeyState};
+            state.pointer_location = (100.0, 100.0).into();
+            crate::keybinds::handle_keyboard_key(
+                state,
+                smithay::input::keyboard::Keycode::new(133),
+                KeyState::Pressed,
+                36,
+            );
+            assert!(state.handle_compositor_button(0x111, ButtonState::Pressed, 37));
+            let menu = state.window_menu.as_ref().unwrap();
+            assert!(menu.fullscreen && menu.maximized);
+            let rect = menu.rect;
+            state.handle_compositor_button(0x111, ButtonState::Released, 38);
+            state.pointer_location =
+                (f64::from(rect.loc.x + 50), f64::from(rect.loc.y + 45)).into();
+            assert!(state.handle_compositor_button(0x110, ButtonState::Pressed, 39));
+            assert!(state.handle_compositor_button(0x110, ButtonState::Released, 40));
+            crate::keybinds::handle_keyboard_key(
+                state,
+                smithay::input::keyboard::Keycode::new(133),
+                KeyState::Released,
+                41,
+            );
+            assert!(!find(state, "primary").fullscreen);
+            assert!(!find(state, "primary").maximized);
+            assert!(find(state, "primary").floating);
+            let primary = state.capture_window(primary_id).unwrap();
+            state.focus_managed_window(&primary);
+            state.toggle_floating_focused().unwrap();
+            state.set_window_maximized(&primary, true);
+        });
+        settle(&mut queue, &mut client);
+        at.set_fullscreen(None);
+        settle(&mut queue, &mut client);
+        assert!(client.configures[&1].fullscreen && client.configures[&1].maximized);
         let (full_hidden, full_hidden_xdg, full_hidden_top) = create(9, "fullscreen-hidden");
         full_hidden.commit();
         settle(&mut queue, &mut client);

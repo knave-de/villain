@@ -142,7 +142,6 @@ impl Villain {
                 return swallowed;
             }
             if state == ButtonState::Pressed {
-                self.pressed_buttons.insert(button);
                 self.swallowed_buttons.insert(button);
                 let inside = self
                     .window_menu
@@ -235,12 +234,12 @@ impl Villain {
                 let bar = crate::workspaces::titlebar_rect(&window, rect, fullscreen)?;
                 bar.to_f64()
                     .contains(self.pointer_location)
-                    .then_some((window, bar, maximized, tiled))
+                    .then_some((window, bar, fullscreen, maximized, tiled))
             });
-        let Some((window, _bar, maximized, tiled)) = hit else {
+        let Some((window, _bar, fullscreen, maximized, tiled)) = hit else {
             return false;
         };
-        self.open_window_menu(window, self.pointer_location, maximized, tiled);
+        self.open_window_menu(window, self.pointer_location, fullscreen, maximized, tiled);
         true
     }
 
@@ -269,10 +268,10 @@ impl Villain {
         else {
             return false;
         };
-        if !visible || fullscreen {
+        if !visible {
             return false;
         }
-        self.open_window_menu(window, self.pointer_location, maximized, tiled);
+        self.open_window_menu(window, self.pointer_location, fullscreen, maximized, tiled);
         true
     }
 
@@ -280,6 +279,7 @@ impl Villain {
         &mut self,
         window: Window,
         anchor: smithay::utils::Point<f64, smithay::utils::Logical>,
+        fullscreen: bool,
         maximized: bool,
         tiled: bool,
     ) {
@@ -296,6 +296,7 @@ impl Villain {
             window_id,
             rect,
             hovered: None,
+            fullscreen,
             maximized,
             tiled,
         });
@@ -324,6 +325,9 @@ impl Villain {
         match row {
             0 => self.apply_window_action(&window, crate::workspaces::WindowAction::Minimize),
             1 => {
+                if menu.fullscreen {
+                    self.set_window_fullscreen(&window, false);
+                }
                 if menu.maximized {
                     self.set_window_maximized(&window, false);
                 }
@@ -331,7 +335,13 @@ impl Villain {
                     let _ = self.toggle_floating_focused();
                 }
             }
-            2 => self.set_window_maximized(&window, !menu.maximized),
+            2 => {
+                if menu.fullscreen {
+                    self.set_window_fullscreen(&window, false);
+                } else {
+                    self.set_window_maximized(&window, !menu.maximized);
+                }
+            }
             3 => self.apply_window_action(&window, crate::workspaces::WindowAction::Close),
             _ => {}
         }
