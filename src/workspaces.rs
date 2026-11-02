@@ -712,6 +712,29 @@ impl Villain {
         }
     }
 
+    /// Apply decoration-driven client geometry to one window without remapping
+    /// its siblings or disturbing the active workspace's focus and pointer state.
+    pub(crate) fn update_window_decoration(&mut self, window: &Window) -> bool {
+        let Some(index) = self.workspace_for_window(window) else {
+            return false;
+        };
+        let Some((_, rect, fullscreen, maximized, tiled, visible)) = self
+            .workspace_layout(index)
+            .into_iter()
+            .find(|(candidate, ..)| candidate == window)
+        else {
+            return false;
+        };
+        Self::configure_window(window, rect.loc, rect.size, fullscreen, maximized, tiled);
+        if index == self.active_workspace {
+            if visible {
+                self.space.map_element(window.clone(), rect.loc, false);
+            }
+            self.request_repaint();
+        }
+        true
+    }
+
     pub fn set_window_fullscreen(&mut self, window: &Window, fullscreen: bool) {
         self.desktop_state_dirty = true;
         let Some(index) = self.workspace_for_window(window) else {

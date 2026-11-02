@@ -1003,10 +1003,14 @@ impl Villain {
             return;
         }
         toplevel.with_pending_state(|state| state.decoration_mode = Some(mode));
-        if toplevel.is_initial_configure_sent() {
+        let window = self.window_for_surface(toplevel.wl_surface());
+        if window
+            .as_ref()
+            .is_none_or(|window| !self.update_window_decoration(window))
+            && toplevel.is_initial_configure_sent()
+        {
             toplevel.send_pending_configure();
         }
-        self.relayout_active_workspace();
     }
 }
 

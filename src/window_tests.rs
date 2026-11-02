@@ -29,6 +29,7 @@ struct Configure {
 #[derive(Default)]
 struct Client {
     configures: HashMap<usize, Configure>,
+    configure_counts: HashMap<usize, usize>,
     decoration_configure_counts: HashMap<usize, usize>,
     pointer_buttons: usize,
     swipes: Vec<String>,
@@ -111,6 +112,7 @@ impl Dispatch<xdg_toplevel::XdgToplevel, usize> for Client {
                     tiled: states.contains(&(xdg_toplevel::State::TiledLeft as u32)),
                 },
             );
+            *state.configure_counts.entry(*id).or_default() += 1;
         } else if let xdg_toplevel::Event::Close = event {
             state.closes += 1;
         }
@@ -1726,6 +1728,14 @@ fn xdg_decoration_negotiation_and_geometry() {
         surface.commit();
         queue.roundtrip(&mut client).unwrap();
         queue.roundtrip(&mut client).unwrap();
+        let sibling_surface = compositor.create_surface(&qh, ());
+        let sibling_xdg = wm.get_xdg_surface(&sibling_surface, &qh, ());
+        let sibling_top = sibling_xdg.get_toplevel(&qh, 2);
+        sibling_top.set_app_id("sibling.application".into());
+        sibling_surface.commit();
+        queue.roundtrip(&mut client).unwrap();
+        queue.roundtrip(&mut client).unwrap();
+        let sibling_configures = client.configure_counts[&2];
         assert_eq!(
             client.decoration_modes[&1],
             zxdg_toplevel_decoration_v1::Mode::ServerSide as u32
@@ -1737,6 +1747,10 @@ fn xdg_decoration_negotiation_and_geometry() {
         assert_eq!(
             client.decoration_modes[&1],
             zxdg_toplevel_decoration_v1::Mode::ClientSide as u32
+        );
+        assert_eq!(
+            client.configure_counts[&2], sibling_configures,
+            "changing one window's decoration mode must not configure its sibling"
         );
         let client_side_configures = client.decoration_configure_counts[&1];
         decoration.set_mode(zxdg_toplevel_decoration_v1::Mode::ClientSide);
