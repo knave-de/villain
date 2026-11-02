@@ -168,12 +168,13 @@ pub(crate) fn constrain_geometry(
 
 fn move_floating_geometry(
     mut saved: Geometry,
+    visible: Geometry,
     output: Size<i32, smithay::utils::Logical>,
     min: Size<i32, smithay::utils::Logical>,
     max: Size<i32, smithay::utils::Logical>,
     delta: (i32, i32),
 ) -> Geometry {
-    let mut moved = constrain_geometry(saved, output, min, max);
+    let mut moved = visible;
     moved.loc.x = moved.loc.x.saturating_add(delta.0);
     moved.loc.y = moved.loc.y.saturating_add(delta.1);
     saved.loc = constrain_geometry(moved, output, min, max).loc;
@@ -1690,7 +1691,7 @@ impl Villain {
                 .find(|entry| entry.window == current)
                 && let Some(mut saved) = entry.floating
             {
-                saved = move_floating_geometry(saved, self.output_size, min, max, (dx, dy));
+                saved = move_floating_geometry(saved, *rect, self.output_size, min, max, (dx, dy));
                 entry.floating = Some(saved);
                 self.desktop_state_dirty = true;
                 self.relayout_active_workspace();
