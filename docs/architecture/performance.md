@@ -19,6 +19,13 @@ runtime paths when they are affected. Compilation, unit tests, and compositor
 startup alone do not prove acceptable DRM, Wayland, GPU, or lifecycle resource
 behavior.
 
+With DEBUG logging enabled for the `villain::perf` tracing target, rendering
+records threshold-triggered slow-frame, scene-generation, overview, titlebar
+raster, and effect-composition diagnostics. These events help locate expensive
+work; they are not a frame-time guarantee or a substitute for workload-based
+CPU, memory, and presentation measurements. Titlebar raster buffers use a
+bounded eight-entry LRU cache.
+
 Record a baseline and expected delta for performance-sensitive changes. Explain
 or mitigate regressions before merge; do not hide them by reducing the workload
 or omitting measurements.
