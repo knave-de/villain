@@ -357,8 +357,8 @@ impl EffectsRenderer {
                 {
                     let distance =
                         f64::from(bar_rect.loc.x + bar_rect.size.w) - state.pointer_location.x;
-                    (distance > 0.0 && distance <= 96.0)
-                        .then_some(((distance - f64::EPSILON) / 24.0) as u8)
+                    crate::appearance::TitlebarControl::from_right_distance(distance)
+                        .map(|control| control.right_slot() as u8)
                 } else {
                     None
                 };

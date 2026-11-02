@@ -195,14 +195,20 @@ impl Villain {
         self.focus_managed_window(&window);
         self.swallowed_buttons.insert(button);
         let from_right = f64::from(bar.loc.x + bar.size.w) - self.pointer_location.x;
-        if from_right <= 24.0 {
-            self.apply_window_action(&window, crate::workspaces::WindowAction::Close);
-        } else if from_right <= 48.0 {
-            self.set_window_maximized(&window, !maximized);
-        } else if from_right <= 72.0 {
-            let _ = self.toggle_floating_focused();
-        } else if from_right <= 96.0 {
-            self.apply_window_action(&window, crate::workspaces::WindowAction::Minimize);
+        if let Some(control) = crate::appearance::TitlebarControl::from_right_distance(from_right) {
+            use crate::appearance::TitlebarControl;
+            match control {
+                TitlebarControl::Close => {
+                    self.apply_window_action(&window, crate::workspaces::WindowAction::Close)
+                }
+                TitlebarControl::Maximize => self.set_window_maximized(&window, !maximized),
+                TitlebarControl::Float => {
+                    let _ = self.toggle_floating_focused();
+                }
+                TitlebarControl::Minimize => {
+                    self.apply_window_action(&window, crate::workspaces::WindowAction::Minimize)
+                }
+            }
         } else if let Some(id) = self.window_id(&window) {
             let double = self
                 .titlebar_click

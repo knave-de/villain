@@ -199,12 +199,14 @@ impl Titlebars {
         // Hit testing counts slots from the right: close, maximize, float,
         // minimize. Rendering places their matching glyphs in those slots.
         let glyph = self.foreground;
-        let center = |slot: i32| control_origin(width, slot);
+        let center = |control: crate::appearance::TitlebarControl| {
+            control_origin(width, control.right_slot())
+        };
         stroke_path(
             &mut pixels,
             width,
             glyph,
-            center(3),
+            center(crate::appearance::TitlebarControl::Minimize),
             &[(5.0, 12.0), (19.0, 12.0)],
         );
         if tiled {
@@ -212,7 +214,7 @@ impl Titlebars {
                 &mut pixels,
                 width,
                 glyph,
-                center(2),
+                center(crate::appearance::TitlebarControl::Float),
                 &[
                     (3.0, 3.0),
                     (15.0, 3.0),
@@ -225,7 +227,7 @@ impl Titlebars {
                 &mut pixels,
                 width,
                 glyph,
-                center(2),
+                center(crate::appearance::TitlebarControl::Float),
                 &[
                     (9.0, 9.0),
                     (21.0, 9.0),
@@ -240,7 +242,7 @@ impl Titlebars {
                 &mut pixels,
                 width,
                 glyph,
-                center(2),
+                center(crate::appearance::TitlebarControl::Float),
                 &[
                     (4.0, 4.0),
                     (20.0, 4.0),
@@ -253,14 +255,14 @@ impl Titlebars {
                 &mut pixels,
                 width,
                 glyph,
-                center(2),
+                center(crate::appearance::TitlebarControl::Float),
                 &[(12.0, 4.0), (12.0, 20.0)],
             );
             stroke_path(
                 &mut pixels,
                 width,
                 glyph,
-                center(2),
+                center(crate::appearance::TitlebarControl::Float),
                 &[(4.0, 12.0), (20.0, 12.0)],
             );
         }
@@ -270,7 +272,7 @@ impl Titlebars {
                 &mut pixels,
                 width,
                 glyph,
-                center(1),
+                center(crate::appearance::TitlebarControl::Maximize),
                 &[
                     (8.0, 4.0),
                     (20.0, 4.0),
@@ -283,14 +285,14 @@ impl Titlebars {
                 &mut pixels,
                 width,
                 glyph,
-                center(1),
+                center(crate::appearance::TitlebarControl::Maximize),
                 &[(4.0, 8.0), (4.0, 20.0), (16.0, 20.0), (16.0, 16.0)],
             );
             stroke_path(
                 &mut pixels,
                 width,
                 glyph,
-                center(1),
+                center(crate::appearance::TitlebarControl::Maximize),
                 &[(4.0, 8.0), (8.0, 8.0)],
             );
         } else {
@@ -298,7 +300,7 @@ impl Titlebars {
                 &mut pixels,
                 width,
                 glyph,
-                center(1),
+                center(crate::appearance::TitlebarControl::Maximize),
                 &[
                     (5.0, 5.0),
                     (19.0, 5.0),
@@ -312,14 +314,14 @@ impl Titlebars {
             &mut pixels,
             width,
             glyph,
-            center(0),
+            center(crate::appearance::TitlebarControl::Close),
             &[(6.0, 6.0), (18.0, 18.0)],
         );
         stroke_path(
             &mut pixels,
             width,
             glyph,
-            center(0),
+            center(crate::appearance::TitlebarControl::Close),
             &[(6.0, 18.0), (18.0, 6.0)],
         );
         let buffer = MemoryRenderBuffer::from_slice(
@@ -351,21 +353,26 @@ mod tests {
     #[test]
     fn controls_match_actions_and_are_centered_in_hit_slots() {
         let width = 800;
-        // Pointer distances and rendering use the same right-edge slots:
-        // close, maximize, float, minimize.
-        let controls = ["close", "maximize", "float", "minimize"];
-        for (index, control) in controls.into_iter().enumerate() {
-            let index = index as i32;
-            let (origin, _) = super::control_origin(width, index);
+        use crate::appearance::TitlebarControl as Control;
+        let controls = [
+            (Control::Close, 12.0),
+            (Control::Maximize, 36.0),
+            (Control::Float, 60.0),
+            (Control::Minimize, 84.0),
+        ];
+        for (control, distance) in controls {
+            assert_eq!(Control::from_right_distance(distance), Some(control));
+            let (origin, _) = super::control_origin(width, control.right_slot());
             let glyph_center = origin + 12.0;
-            let hit_left = (width - (index + 1) * 24) as f32;
-            let hit_right = (width - index * 24) as f32;
+            let slot = control.right_slot();
+            let hit_left = (width - (slot + 1) * 24) as f32;
+            let hit_right = (width - slot * 24) as f32;
             assert_eq!(glyph_center, (hit_left + hit_right) / 2.0);
-            assert_eq!(
-                control,
-                ["close", "maximize", "float", "minimize"][index as usize]
-            );
         }
+        assert_eq!(Control::from_right_distance(24.0), Some(Control::Close));
+        assert_eq!(Control::from_right_distance(48.0), Some(Control::Maximize));
+        assert_eq!(Control::from_right_distance(72.0), Some(Control::Float));
+        assert_eq!(Control::from_right_distance(96.0), Some(Control::Minimize));
     }
 
     #[test]
