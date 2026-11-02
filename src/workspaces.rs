@@ -1647,6 +1647,56 @@ impl Villain {
         self.reveal_and_focus(index, target.0, true);
     }
 
+    /// Move a floating window by a fixed step or swap a tile with its nearest neighbor.
+    pub fn move_focused_directional(&mut self, direction: FocusDirection) {
+        let Some(current) = self.focused_window() else {
+            return;
+        };
+        let index = self.active_workspace;
+        let placements = self.workspace_layout(index);
+        let Some((_, rect, fullscreen, maximized, tiled, visible)) =
+            placements.iter().find(|entry| entry.0 == current)
+        else {
+            return;
+        };
+        if *fullscreen || *maximized || !*visible {
+            return;
+        }
+        if !*tiled {
+            let (dx, dy) = match direction {
+                FocusDirection::Left => (-32, 0),
+                FocusDirection::Right => (32, 0),
+                FocusDirection::Up => (0, -32),
+                FocusDirection::Down => (0, 32),
+            };
+            let (min, max) = Self::window_constraints(&current);
+            let mut moved = *rect;
+            moved.loc.x = moved.loc.x.saturating_add(dx);
+            moved.loc.y = moved.loc.y.saturating_add(dy);
+            let moved = constrain_geometry(moved, self.output_size, min, max);
+            if let Some(entry) = self.workspaces[index]
+                .windows
+                .iter_mut()
+                .find(|entry| entry.window == current)
+            {
+                entry.floating = Some(moved);
+                self.desktop_state_dirty = true;
+                self.relayout_active_workspace();
+            }
+            return;
+        }
+        let candidates: Vec<_> = self
+            .tiled_slots()
+            .into_iter()
+            .filter(|(window, _)| *window != current)
+            .collect();
+        let centers: Vec<_> = candidates.iter().map(|(_, rect)| center_of(rect)).collect();
+        if let Some(target) = nearest_center_in_direction(&centers, center_of(rect), direction) {
+            self.swap_tiles(&current, &candidates[target].0);
+            self.request_repaint();
+        }
+    }
+
     /// Focus a window on workspace `index`, leaving fullscreen and maximize
     /// when the target is currently obscured by one of those overlays.
     /// `remember` controls whether the target moves to the front of the
