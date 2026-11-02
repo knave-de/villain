@@ -265,6 +265,21 @@ impl Workspace {
 }
 
 impl Villain {
+    /// The gallery's server titlebar is compositor-owned, while the mapped
+    /// element location already marks the client surface origin. Other
+    /// windows may have geometry extents that must be removed from the element
+    /// location to find that origin.
+    fn pointer_origin(
+        window: &Window,
+        location: Point<i32, smithay::utils::Logical>,
+    ) -> Point<i32, smithay::utils::Logical> {
+        if window.toplevel().is_some_and(gallery_toplevel) {
+            location
+        } else {
+            location - window.geometry().loc
+        }
+    }
+
     pub(crate) fn capture_window(&self, id: WindowId) -> Option<Window> {
         self.workspaces
             .iter()
@@ -2157,7 +2172,7 @@ impl Villain {
         let layout = self.workspace_layout(self.active_workspace);
         for window in self.space.elements().rev() {
             let location = self.space.element_location(window)?;
-            let origin = location - window.geometry().loc;
+            let origin = Self::pointer_origin(window, location);
             let Some((surface, _)) = window.surface_under(
                 self.pointer_location - origin.to_f64(),
                 WindowSurfaceType::ALL,
