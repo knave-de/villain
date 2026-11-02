@@ -2,6 +2,8 @@
 pub(crate) use paint::normalized_radii;
 #[path = "paint.rs"]
 mod paint;
+#[path = "titlebar.rs"]
+mod titlebar;
 use crate::{focus::KeyboardFocus, state::Villain};
 use knave_config::{
     WindowAppearance,
@@ -16,6 +18,7 @@ use smithay::{
             damage::OutputDamageTracker,
             element::{
                 AsRenderElements, Element, Id, Kind,
+                memory::MemoryRenderBufferRenderElement,
                 solid::SolidColorRenderElement,
                 surface::{WaylandSurfaceRenderElement, render_elements_from_surface_tree},
                 texture::{TextureBuffer, TextureRenderElement},
@@ -39,6 +42,7 @@ smithay::backend::renderer::element::render_elements! {
     pub EffectElement<=GlesRenderer>;
     Surface=WaylandSurfaceRenderElement<GlesRenderer>,
     Solid=SolidColorRenderElement,
+    Memory=MemoryRenderBufferRenderElement<GlesRenderer>,
     CroppedSurface=CropRenderElement<WaylandSurfaceRenderElement<GlesRenderer>>,
     Shape=PixelShaderElement,
     Texture=TextureRenderElement<GlesTexture>,
@@ -89,6 +93,7 @@ struct CachedScene {
 #[derive(Default)]
 pub(crate) struct EffectsRenderer {
     programs: Option<(GlesPixelProgram, GlesTexProgram)>,
+    titlebars: titlebar::Titlebars,
     scenes: VecDeque<CachedScene>,
     panes: VecDeque<CachedPane>,
 }
@@ -344,7 +349,49 @@ impl EffectsRenderer {
                 render_scale,
             );
             key.sources.extend(elements.iter().map(source_key));
-            sources.push(elements);
+            let bar = if let Some(bar_rect) =
+                crate::workspaces::titlebar_rect(window, *rect, *fullscreen)
+            {
+                let hovered = if workspace == state.active_workspace
+                    && bar_rect.to_f64().contains(state.pointer_location)
+                {
+                    let distance =
+                        f64::from(bar_rect.loc.x + bar_rect.size.w) - state.pointer_location.x;
+                    (distance > 0.0 && distance <= 96.0)
+                        .then_some(((distance - f64::EPSILON) / 24.0) as u8)
+                } else {
+                    None
+                };
+                if let Some(buffer) = self.titlebars.buffer(
+                    window,
+                    bar_rect.size.w,
+                    is_focused,
+                    hovered,
+                    *maximized,
+                    *tiled,
+                ) {
+                    let element = MemoryRenderBufferRenderElement::from_buffer(
+                        renderer,
+                        (
+                            f64::from(bar_rect.loc.x) * render_scale,
+                            f64::from(bar_rect.loc.y) * render_scale,
+                        ),
+                        buffer,
+                        None,
+                        None,
+                        None,
+                        Kind::Unspecified,
+                    )
+                    .map_err(EffectError::Renderer)?;
+                    key.sources.push(source_key(&element));
+                    Some(EffectElement::Memory(element))
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            sources.push((elements, bar));
         }
         // Include override-redirect X11 surfaces without adding decorations.
         let mut unmanaged = Vec::new();
@@ -370,7 +417,10 @@ impl EffectsRenderer {
         if !any_effect {
             self.scenes
                 .retain(|entry| entry.key.workspace != workspace || entry.key.layers != layers);
-            for source in sources {
+            for (mut source, bar) in sources {
+                if let Some(bar) = bar {
+                    source.insert(0, bar);
+                }
                 lower.splice(0..0, source);
             }
             unmanaged.extend(lower);
@@ -393,7 +443,7 @@ impl EffectsRenderer {
         let background = [0.0, 0.0, 0.0, 1.0];
         let mut elements = lower;
         let mut live_pixels = 0_i64;
-        for ((window, rect, fullscreen, maximized, tiled, _), original) in
+        for ((window, rect, fullscreen, maximized, tiled, _), (original, bar)) in
             windows.into_iter().zip(sources)
         {
             let view = if fullscreen {
@@ -500,6 +550,9 @@ impl EffectsRenderer {
                 }
             } else {
                 window_elements.extend(original);
+            }
+            if let Some(bar) = bar {
+                window_elements.insert(0, bar);
             }
             if widths != Edges::default() {
                 window_elements.push(EffectElement::Shape(border(
