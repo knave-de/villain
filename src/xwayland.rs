@@ -1538,5 +1538,48 @@ mod tests {
         assert!(state.interaction.is_some(), "move request starts a drag");
         state.release_pointer_buttons();
         assert!(!state.pointer.is_grabbed());
+
+        // Chromium/Electron sends _NET_WM_MOVERESIZE with button 0 instead
+        // of the initiating button. Fall back to the held grab button.
+        state.refresh_pointer_and_focus(2);
+        assert!(
+            !state.handle_compositor_button(
+                0x110,
+                smithay::backend::input::ButtonState::Pressed,
+                2
+            ),
+            "a client titlebar press belongs to the X11 client"
+        );
+        let serial = smithay::utils::SERIAL_COUNTER.next_serial();
+        state.pointer.clone().button(
+            &mut state,
+            &smithay::input::pointer::ButtonEvent {
+                serial,
+                time: 2,
+                button: 0x110,
+                state: smithay::backend::input::ButtonState::Pressed,
+            },
+        );
+        state.pointer.clone().frame(&mut state);
+        assert!(state.x11_grab_button_matches(0));
+
+        conn.send_event(
+            false,
+            root,
+            EventMask::SUBSTRUCTURE_REDIRECT | EventMask::SUBSTRUCTURE_NOTIFY,
+            ClientMessageEvent::new(32, id, moveresize, [40u32, 10, 8, 0, 1]),
+        )
+        .unwrap();
+        conn.flush().unwrap();
+
+        pump_until(&mut event_loop, &mut state, |state| {
+            state.interaction.is_some()
+        });
+        assert!(
+            state.interaction.is_some(),
+            "an Electron move request starts a drag"
+        );
+        state.release_pointer_buttons();
+        assert!(!state.pointer.is_grabbed());
     }
 }
