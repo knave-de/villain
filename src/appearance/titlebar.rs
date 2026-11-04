@@ -92,6 +92,7 @@ fn paint_hover(pixels: &mut [u8], width: i32, index: u8) {
 }
 
 struct Entry {
+    window_id: knave_desktop_api::WindowId,
     title: String,
     width: i32,
     focused: bool,
@@ -99,6 +100,13 @@ struct Entry {
     maximized: bool,
     tiled: bool,
     buffer: MemoryRenderBuffer,
+}
+#[derive(Clone, Copy)]
+pub(super) struct TitlebarState {
+    pub(super) focused: bool,
+    pub(super) hovered: Option<u8>,
+    pub(super) maximized: bool,
+    pub(super) tiled: bool,
 }
 pub(super) struct Titlebars {
     fonts: FontSystem,
@@ -147,12 +155,10 @@ impl Default for Titlebars {
 impl Titlebars {
     pub(super) fn buffer(
         &mut self,
+        window_id: knave_desktop_api::WindowId,
         window: &Window,
         width: i32,
-        focused: bool,
-        hovered: Option<u8>,
-        maximized: bool,
-        tiled: bool,
+        state: TitlebarState,
     ) -> Option<&MemoryRenderBuffer> {
         let width = width.clamp(1, 8192);
         let title = window
@@ -168,21 +174,23 @@ impl Titlebars {
             })
             .unwrap_or_default();
         if let Some(index) = self.entries.iter().position(|entry| {
-            entry.title == title
+            entry.window_id == window_id
+                && entry.title == title
                 && entry.width == width
-                && entry.focused == focused
-                && entry.hovered == hovered
-                && entry.maximized == maximized
-                && entry.tiled == tiled
+                && entry.focused == state.focused
+                && entry.hovered == state.hovered
+                && entry.maximized == state.maximized
+                && entry.tiled == state.tiled
         }) {
             let entry = self.entries.remove(index)?;
             self.entries.push_front(entry);
             return self.entries.front().map(|e| &e.buffer);
         }
+        self.entries.retain(|entry| entry.window_id != window_id);
         let profile_raster = tracing::enabled!(target: "villain::perf", tracing::Level::DEBUG);
         let raster_started = profile_raster.then(Instant::now);
         let mut bg = self.background;
-        if !focused {
+        if !state.focused {
             for value in &mut bg[..3] {
                 *value = (*value as f32 * 0.8) as u8;
             }
@@ -191,7 +199,7 @@ impl Titlebars {
         for px in pixels.as_chunks_mut::<4>().0 {
             px.copy_from_slice(&bgra(bg));
         }
-        if let Some(index) = hovered {
+        if let Some(index) = state.hovered {
             paint_hover(&mut pixels, width, index);
         }
         let mut text = Buffer::new(&mut self.fonts, Metrics::new(13.0, 18.0));
@@ -234,7 +242,7 @@ impl Titlebars {
             center(crate::appearance::TitlebarControl::Minimize),
             &[(5.0, 12.0), (19.0, 12.0)],
         );
-        if tiled {
+        if state.tiled {
             stroke_path(
                 &mut pixels,
                 width,
@@ -291,7 +299,7 @@ impl Titlebars {
                 &[(4.0, 12.0), (20.0, 12.0)],
             );
         }
-        if maximized {
+        if state.maximized {
             // Restore: two offset windows, with the rear window's top edge visible.
             stroke_path(
                 &mut pixels,
@@ -358,17 +366,15 @@ impl Titlebars {
             None,
         );
         self.entries.push_front(Entry {
+            window_id,
             title,
             width,
-            focused,
-            hovered,
-            maximized,
-            tiled,
+            focused: state.focused,
+            hovered: state.hovered,
+            maximized: state.maximized,
+            tiled: state.tiled,
             buffer,
         });
-        while self.entries.len() > 8 {
-            self.entries.pop_back();
-        }
         if let Some(started) = raster_started {
             let raster_us = started.elapsed().as_micros();
             let slow = raster_us >= SLOW_TITLEBAR_RASTER_US;
@@ -379,14 +385,18 @@ impl Titlebars {
                 slow,
                 width,
                 title_chars = self.entries.front().map_or(0, |entry| entry.title.chars().count()),
-                focused,
-                hovered = hovered.is_some(),
-                maximized,
-                tiled,
+                focused = state.focused,
+                hovered = state.hovered.is_some(),
+                maximized = state.maximized,
+                tiled = state.tiled,
                 "titlebar cache miss rasterized"
             );
         }
         self.entries.front().map(|entry| &entry.buffer)
+    }
+
+    pub(super) fn remove_window(&mut self, window_id: knave_desktop_api::WindowId) {
+        self.entries.retain(|entry| entry.window_id != window_id);
     }
 }
 

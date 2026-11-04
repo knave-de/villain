@@ -226,6 +226,12 @@ impl EffectsRenderer {
         self.scenes.clear();
         self.panes.clear();
     }
+
+    pub(crate) fn remove_titlebar(&mut self, window_id: knave_desktop_api::WindowId) {
+        if let Some(titlebars) = &mut self.titlebars {
+            titlebars.remove_window(window_id);
+        }
+    }
     pub(crate) fn scene(
         &mut self,
         state: &Villain,
@@ -400,9 +406,10 @@ impl EffectsRenderer {
                 render_scale,
             );
             key.sources.extend(elements.iter().map(source_key));
-            let bar = if let Some(bar_rect) =
-                crate::workspaces::titlebar_rect(window, *rect, *fullscreen)
-            {
+            let bar = if let (Some(bar_rect), Some(window_id)) = (
+                crate::workspaces::titlebar_rect(window, *rect, *fullscreen),
+                state.window_id(window),
+            ) {
                 let hovered = if workspace == state.active_workspace
                     && bar_rect.to_f64().contains(state.pointer_location)
                 {
@@ -417,12 +424,15 @@ impl EffectsRenderer {
                     .titlebars
                     .get_or_insert_with(titlebar::Titlebars::default)
                     .buffer(
+                        window_id,
                         window,
                         bar_rect.size.w,
-                        is_focused,
-                        hovered,
-                        *maximized,
-                        *tiled,
+                        titlebar::TitlebarState {
+                            focused: is_focused,
+                            hovered,
+                            maximized: *maximized,
+                            tiled: *tiled,
+                        },
                     )
                 {
                     let element = MemoryRenderBufferRenderElement::from_buffer(

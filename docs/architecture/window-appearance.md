@@ -37,9 +37,10 @@ Villain provides a 34 logical-pixel titlebar when an xdg-toplevel uses the
 `xdg-decoration` protocol in server-side mode. Villain initially offers server
 side decoration and follows the client's negotiated mode; a client that
 requests client-side decoration keeps its own chrome and receives no Villain
-titlebar. Removing the decoration object returns the toplevel to server-side
-mode. The titlebar is outside the client's configured content rectangle and is
-not shown for fullscreen windows. XWayland windows do not use this xdg-toplevel
+titlebar. Destroying the decoration object returns the toplevel to client-side
+mode at its next surface commit. The titlebar is outside the client's
+configured content rectangle and is not shown for fullscreen windows. XWayland
+windows do not use this xdg-toplevel
 negotiation and do not receive these titlebars.
 
 The titlebar controls from right to left are close, maximize/restore, toggle

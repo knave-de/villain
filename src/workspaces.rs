@@ -956,10 +956,23 @@ impl Villain {
             .find(|entry| entry.window == *window)
             .unwrap();
         entry.floating = Some(geometry);
-        let geometry = self.floating_placement(geometry);
-        Self::configure_window(window, geometry.loc, geometry.size, false, false, false);
+        let mut client_geometry = self.floating_placement(geometry);
+        if window.toplevel().is_some_and(has_server_side_decoration) {
+            let height = TITLEBAR_HEIGHT.min(client_geometry.size.h.saturating_sub(1).max(0));
+            client_geometry.loc.y += height;
+            client_geometry.size.h -= height;
+        }
+        Self::configure_window(
+            window,
+            client_geometry.loc,
+            client_geometry.size,
+            false,
+            false,
+            false,
+        );
         if self.space.element_location(window).is_some() {
-            self.space.map_element(window.clone(), geometry.loc, false);
+            self.space
+                .map_element(window.clone(), client_geometry.loc, false);
             self.sync_x11_stacking();
             self.request_repaint();
         }
@@ -2560,6 +2573,9 @@ impl Villain {
     }
 
     fn remove_managed_window(&mut self, target: &Window) {
+        if let Some(id) = self.window_id(target) {
+            self.appearance_renderer.remove_titlebar(id);
+        }
         self.appearance_renderer.clear();
         for workspace in &mut self.workspaces {
             let removed: Vec<_> = workspace

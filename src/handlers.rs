@@ -641,12 +641,8 @@ impl XdgShellHandler for Villain {
         self.desktop_state_dirty = true;
     }
 
-    fn app_id_changed(&mut self, surface: ToplevelSurface) {
+    fn app_id_changed(&mut self, _surface: ToplevelSurface) {
         self.desktop_state_dirty = true;
-        let configured = surface.is_initial_configure_sent();
-        if configured {
-            self.relayout_active_workspace();
-        }
     }
 
     fn new_toplevel(&mut self, surface: ToplevelSurface) {

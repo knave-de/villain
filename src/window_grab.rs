@@ -176,19 +176,26 @@ impl Villain {
         if !self.can_start_interaction() || self.layer_under_pointer(true).is_some() {
             return false;
         }
-        let hit = self
+        let mut hit = None;
+        for (window, rect, fullscreen, maximized, _, visible) in self
             .workspace_layout(self.active_workspace)
             .into_iter()
             .rev()
-            .find_map(|(window, rect, fullscreen, maximized, _, visible)| {
-                if !visible {
-                    return None;
-                }
-                let bar = crate::workspaces::titlebar_rect(&window, rect, fullscreen)?;
-                bar.to_f64()
-                    .contains(self.pointer_location)
-                    .then_some((window, bar, maximized))
-            });
+        {
+            if !visible {
+                continue;
+            }
+            if let Some(bar) = crate::workspaces::titlebar_rect(&window, rect, fullscreen)
+                && bar.to_f64().contains(self.pointer_location)
+            {
+                hit = Some((window, bar, maximized));
+                break;
+            }
+            // A higher window's content occludes titlebars underneath it.
+            if rect.to_f64().contains(self.pointer_location) {
+                return false;
+            }
+        }
         let Some((window, bar, maximized)) = hit else {
             return false;
         };
