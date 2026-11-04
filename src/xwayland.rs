@@ -237,13 +237,32 @@ impl XwmHandler for Villain {
             && let Some(managed) = self.window_for_x11_surface(&window)
         {
             if let Some(mut geometry) = self.floating_geometry(&managed) {
+                // X11 configure requests describe the client surface. A
+                // compositor titlebar lives above it and must stay outside
+                // the requested content rectangle.
+                let titlebar = self.workspace_for_window(&managed).is_some_and(|index| {
+                    self.workspace_layout(index)
+                        .into_iter()
+                        .find(|entry| entry.0 == managed)
+                        .is_some_and(|(window, rect, fullscreen, ..)| {
+                            crate::workspaces::titlebar_rect(&window, rect, fullscreen).is_some()
+                        })
+                });
+                let titlebar_height = if titlebar {
+                    crate::workspaces::TITLEBAR_HEIGHT
+                } else {
+                    0
+                };
                 geometry.loc.x = x.unwrap_or(geometry.loc.x);
-                geometry.loc.y = y.unwrap_or(geometry.loc.y);
+                geometry.loc.y = y
+                    .map(|value| value - titlebar_height)
+                    .unwrap_or(geometry.loc.y);
                 geometry.size.w = width
                     .and_then(|value| i32::try_from(value).ok())
                     .unwrap_or(geometry.size.w);
                 geometry.size.h = height
                     .and_then(|value| i32::try_from(value).ok())
+                    .map(|value| value + titlebar_height)
                     .unwrap_or(geometry.size.h);
                 self.set_floating_geometry(&managed, geometry);
             }
@@ -297,9 +316,21 @@ impl XwmHandler for Villain {
             WmWindowProperty::NormalHints
                 | WmWindowProperty::TransientFor
                 | WmWindowProperty::WindowType
+                | WmWindowProperty::MotifHints
         ) && let Some(window) = self.window_for_x11_surface(&surface)
         {
             self.refresh_window_hints(&window);
+            if property == WmWindowProperty::MotifHints {
+                // Changing `_MOTIF_WM_HINTS` changes whether Knave owns the
+                // titlebar, which in turn changes the client rectangle.
+                self.update_window_decoration(&window);
+            }
+        }
+        if matches!(
+            property,
+            WmWindowProperty::Title | WmWindowProperty::MotifHints
+        ) {
+            self.request_repaint();
         }
     }
 
@@ -1232,5 +1263,280 @@ mod tests {
         state.switch_workspace(4);
         assert!(!state.pointer.is_grabbed());
         assert!(state.space.element_location(&dialog_window).is_none());
+    }
+
+    fn x11_test_window_geometry(
+        state: &Villain,
+        window: &smithay::desktop::Window,
+    ) -> (
+        smithay::utils::Rectangle<i32, Logical>,
+        Option<smithay::utils::Rectangle<i32, Logical>>,
+    ) {
+        let (_, client, fullscreen, ..) = state
+            .workspace_layout(state.active_workspace)
+            .into_iter()
+            .find(|entry| entry.0 == *window)
+            .unwrap();
+        (
+            client,
+            crate::workspaces::titlebar_rect(window, client, fullscreen),
+        )
+    }
+
+    /// X11 clients that rely on the window manager for decorations get the same
+    /// compositor titlebar as server-side-decorated xdg toplevels, and dragging
+    /// that titlebar moves the window.
+    #[test]
+    #[ignore = "requires Xwayland and an isolated XDG_RUNTIME_DIR"]
+    fn x11_wm_decorated_window_gets_titlebar_drag() {
+        let mut event_loop = EventLoop::try_new().unwrap();
+        let mut state = Villain::new(
+            &mut event_loop,
+            Display::new().unwrap(),
+            crate::config::RuntimeConfig::load().unwrap(),
+        );
+        let output = smithay::output::Output::new(
+            "test".into(),
+            smithay::output::PhysicalProperties {
+                size: (0, 0).into(),
+                subpixel: smithay::output::Subpixel::Unknown,
+                make: "test".into(),
+                model: "test".into(),
+            },
+        );
+        output.create_global::<Villain>(&state.display_handle);
+        let mode = smithay::output::Mode {
+            size: (800, 600).into(),
+            refresh: 60_000,
+        };
+        output.change_current_state(Some(mode), None, None, Some((0, 0).into()));
+        output.set_preferred(mode);
+        state.space.map_output(&output, (0, 0));
+        init(&mut event_loop, &mut state);
+        pump_until(&mut event_loop, &mut state, |state| {
+            state.xwayland_display.is_some()
+        });
+        let display = format!(":{}", state.xwayland_display.unwrap());
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            sender
+                .send(smithay::reexports::x11rb::connect(Some(&display)))
+                .unwrap()
+        });
+        let mut connection = None;
+        pump_until(&mut event_loop, &mut state, |_| {
+            connection = receiver.try_recv().ok();
+            connection.is_some()
+        });
+        let (conn, screen) = connection.unwrap().unwrap();
+        let root = conn.setup().roots[screen].root;
+        let id = conn.generate_id().unwrap();
+        conn.create_window(
+            0,
+            id,
+            root,
+            100,
+            100,
+            300,
+            200,
+            0,
+            WindowClass::INPUT_OUTPUT,
+            0,
+            &CreateWindowAux::new()
+                .background_pixel(0x123456)
+                .event_mask(EventMask::BUTTON_PRESS | EventMask::BUTTON_RELEASE),
+        )
+        .unwrap();
+        let hints = smithay::reexports::x11rb::properties::WmSizeHints {
+            min_size: Some((300, 200)),
+            max_size: Some((300, 200)),
+            ..Default::default()
+        };
+        hints.set_normal_hints(&conn, id).unwrap();
+        conn.map_window(id).unwrap();
+        conn.flush().unwrap();
+        pump_until(&mut event_loop, &mut state, |state| {
+            state.window_for_x11_id(id).is_some_and(|window| {
+                state.floating_geometry(&window).is_some()
+                    && state.space.element_location(&window).is_some()
+                    && window.x11_surface().unwrap().wl_surface().is_some()
+            })
+        });
+        let window = state.window_for_x11_id(id).unwrap();
+        assert!(!window.x11_surface().unwrap().is_decorated());
+        let (client, bar) = x11_test_window_geometry(&state, &window);
+        let bar = bar.expect("WM-decorated X11 window needs a compositor titlebar");
+        assert_eq!(bar.size.w, client.size.w);
+        assert_eq!(bar.loc.y + crate::workspaces::TITLEBAR_HEIGHT, client.loc.y);
+        let outer = state.floating_geometry(&window).unwrap();
+        assert_eq!(bar.loc, outer.loc);
+
+        state.pointer_location = (f64::from(bar.loc.x + 40), f64::from(bar.loc.y + 10)).into();
+        state.focus_managed_window(&window);
+        state.refresh_pointer_and_focus(1);
+        assert!(
+            state.handle_compositor_button(0x110, smithay::backend::input::ButtonState::Pressed, 1),
+            "the compositor owns titlebar presses"
+        );
+        assert!(
+            state.interaction.is_some(),
+            "titlebar drag starts an interaction"
+        );
+        state.pointer_location += smithay::utils::Point::from((100.0, 50.0));
+        state.refresh_pointer(2);
+        assert_eq!(
+            state.floating_geometry(&window).unwrap().loc,
+            outer.loc + smithay::utils::Point::from((100, 50))
+        );
+        state.release_pointer_buttons();
+        assert!(!state.pointer.is_grabbed());
+    }
+
+    /// Client-side-decorated X11 windows keep their own chrome. Their drag
+    /// requests still reach the compositor through `_NET_WM_MOVERESIZE`.
+    #[test]
+    #[ignore = "requires Xwayland and an isolated XDG_RUNTIME_DIR"]
+    fn x11_client_titlebar_drag_requests_a_move() {
+        let mut event_loop = EventLoop::try_new().unwrap();
+        let mut state = Villain::new(
+            &mut event_loop,
+            Display::new().unwrap(),
+            crate::config::RuntimeConfig::load().unwrap(),
+        );
+        let output = smithay::output::Output::new(
+            "test".into(),
+            smithay::output::PhysicalProperties {
+                size: (0, 0).into(),
+                subpixel: smithay::output::Subpixel::Unknown,
+                make: "test".into(),
+                model: "test".into(),
+            },
+        );
+        output.create_global::<Villain>(&state.display_handle);
+        let mode = smithay::output::Mode {
+            size: (800, 600).into(),
+            refresh: 60_000,
+        };
+        output.change_current_state(Some(mode), None, None, Some((0, 0).into()));
+        output.set_preferred(mode);
+        state.space.map_output(&output, (0, 0));
+        init(&mut event_loop, &mut state);
+        pump_until(&mut event_loop, &mut state, |state| {
+            state.xwayland_display.is_some()
+        });
+        let display = format!(":{}", state.xwayland_display.unwrap());
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            sender
+                .send(smithay::reexports::x11rb::connect(Some(&display)))
+                .unwrap()
+        });
+        let mut connection = None;
+        pump_until(&mut event_loop, &mut state, |_| {
+            connection = receiver.try_recv().ok();
+            connection.is_some()
+        });
+        let (conn, screen) = connection.unwrap().unwrap();
+        let root = conn.setup().roots[screen].root;
+        let id = conn.generate_id().unwrap();
+        conn.create_window(
+            0,
+            id,
+            root,
+            100,
+            100,
+            300,
+            200,
+            0,
+            WindowClass::INPUT_OUTPUT,
+            0,
+            &CreateWindowAux::new()
+                .background_pixel(0x123456)
+                .event_mask(EventMask::BUTTON_PRESS | EventMask::BUTTON_RELEASE),
+        )
+        .unwrap();
+        let motif = conn
+            .intern_atom(false, b"_MOTIF_WM_HINTS")
+            .unwrap()
+            .reply()
+            .unwrap()
+            .atom;
+        conn.change_property32(
+            PropMode::REPLACE,
+            id,
+            motif,
+            motif,
+            &[0x3, 0x1, 0x0, 0x0, 0x0],
+        )
+        .unwrap();
+        conn.map_window(id).unwrap();
+        conn.flush().unwrap();
+        pump_until(&mut event_loop, &mut state, |state| {
+            state.window_for_x11_id(id).is_some_and(|window| {
+                state.space.element_location(&window).is_some()
+                    && window.x11_surface().unwrap().wl_surface().is_some()
+            })
+        });
+        let window = state.window_for_x11_id(id).unwrap();
+        assert!(window.x11_surface().unwrap().is_decorated());
+        let (client, bar) = x11_test_window_geometry(&state, &window);
+        assert!(
+            bar.is_none(),
+            "client-side-decorated X11 windows keep their chrome"
+        );
+        state.pointer_location =
+            (f64::from(client.loc.x + 40), f64::from(client.loc.y + 10)).into();
+        state.focus_managed_window(&window);
+        state.refresh_pointer_and_focus(1);
+        assert_eq!(
+            state
+                .pointer
+                .grab_start_data()
+                .map(|start| start.focus.is_some()),
+            None,
+            "pointer must not be grabbed before the press"
+        );
+        assert!(
+            !state.handle_compositor_button(
+                0x110,
+                smithay::backend::input::ButtonState::Pressed,
+                1
+            ),
+            "a client titlebar press belongs to the X11 client"
+        );
+        let serial = smithay::utils::SERIAL_COUNTER.next_serial();
+        state.pointer.clone().button(
+            &mut state,
+            &smithay::input::pointer::ButtonEvent {
+                serial,
+                time: 1,
+                button: 0x110,
+                state: smithay::backend::input::ButtonState::Pressed,
+            },
+        );
+        state.pointer.clone().frame(&mut state);
+        assert!(state.x11_grab_button_matches(1));
+
+        let moveresize = conn
+            .intern_atom(false, b"_NET_WM_MOVERESIZE")
+            .unwrap()
+            .reply()
+            .unwrap()
+            .atom;
+        conn.send_event(
+            false,
+            root,
+            EventMask::SUBSTRUCTURE_REDIRECT | EventMask::SUBSTRUCTURE_NOTIFY,
+            ClientMessageEvent::new(32, id, moveresize, [40u32, 10, 8, 1, 1]),
+        )
+        .unwrap();
+        conn.flush().unwrap();
+
+        pump_until(&mut event_loop, &mut state, |state| {
+            state.interaction.is_some()
+        });
+        assert!(state.interaction.is_some(), "move request starts a drag");
+        state.release_pointer_buttons();
+        assert!(!state.pointer.is_grabbed());
     }
 }

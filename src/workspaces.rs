@@ -215,12 +215,27 @@ pub(crate) fn has_server_side_decoration(surface: &ToplevelSurface) -> bool {
     })
 }
 
+/// Whether Knave draws a compositor titlebar for this window.
+///
+/// XDG toplevels opt in through server-side decoration negotiation. X11
+/// clients instead declare whether they rely on the window manager for
+/// decorations through `_MOTIF_WM_HINTS`; clients that draw their own chrome
+/// keep their existing titlebar and drag behavior.
+pub(crate) fn has_compositor_titlebar(window: &Window) -> bool {
+    if let Some(toplevel) = window.toplevel() {
+        return has_server_side_decoration(toplevel);
+    }
+    window
+        .x11_surface()
+        .is_some_and(|surface| !surface.is_override_redirect() && !surface.is_decorated())
+}
+
 pub(crate) fn titlebar_rect(
     window: &Window,
     client: Geometry,
     fullscreen: bool,
 ) -> Option<Geometry> {
-    if fullscreen || !window.toplevel().is_some_and(has_server_side_decoration) {
+    if fullscreen || !has_compositor_titlebar(window) {
         return None;
     }
     Some(Rectangle::new(
@@ -328,7 +343,7 @@ impl Villain {
         window: &Window,
         location: Point<i32, smithay::utils::Logical>,
     ) -> Point<i32, smithay::utils::Logical> {
-        if window.toplevel().is_some_and(has_server_side_decoration) {
+        if has_compositor_titlebar(window) {
             location
         } else {
             location - window.geometry().loc
@@ -571,6 +586,11 @@ impl Villain {
         let floating = entry.floating_override.unwrap_or(floating);
         let geometry = if floating {
             let geometry = entry.floating.unwrap_or_else(|| {
+                let titlebar_height = if has_compositor_titlebar(window) {
+                    TITLEBAR_HEIGHT
+                } else {
+                    0
+                };
                 let natural = window.geometry().size;
                 let size = if fixed_size(min, max) {
                     min
@@ -579,6 +599,25 @@ impl Villain {
                 } else {
                     (600, 400).into()
                 };
+                // The saved floating rectangle is the outer frame. Give the
+                // client its natural size below the compositor titlebar.
+                let size = Size::from((size.w, size.h.saturating_add(titlebar_height)));
+                let min = Size::from((
+                    min.w,
+                    if min.h > 0 {
+                        min.h.saturating_add(titlebar_height)
+                    } else {
+                        0
+                    },
+                ));
+                let max = Size::from((
+                    max.w,
+                    if max.h > 0 {
+                        max.h.saturating_add(titlebar_height)
+                    } else {
+                        0
+                    },
+                ));
                 let size =
                     constrain_geometry(Rectangle::from_size(size), self.output_size, min, max).size;
                 let location = if entry.center_override == Some(false) {
@@ -702,12 +741,7 @@ impl Villain {
                 }
             };
             let mut rect = rect;
-            if !is_fullscreen
-                && entry
-                    .window
-                    .toplevel()
-                    .is_some_and(has_server_side_decoration)
-            {
+            if !is_fullscreen && has_compositor_titlebar(&entry.window) {
                 let height = TITLEBAR_HEIGHT.min(rect.size.h.saturating_sub(1).max(0));
                 rect.loc.y += height;
                 rect.size.h -= height;
@@ -957,7 +991,7 @@ impl Villain {
             .unwrap();
         entry.floating = Some(geometry);
         let mut client_geometry = self.floating_placement(geometry);
-        if window.toplevel().is_some_and(has_server_side_decoration) {
+        if has_compositor_titlebar(window) {
             let height = TITLEBAR_HEIGHT.min(client_geometry.size.h.saturating_sub(1).max(0));
             client_geometry.loc.y += height;
             client_geometry.size.h -= height;
